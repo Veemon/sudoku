@@ -309,7 +309,7 @@ void main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    i32 window_width  = 1920;
+    i32 window_width  = 1000;
     i32 window_height = 1080;
 
     GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Sudoku 2077", NULL, NULL);
@@ -387,20 +387,21 @@ void main() {
 
     glBindVertexArray(0);  
 
-    // texture
-    u8* image = (u8*) malloc(TEX_WIDTH * TEX_HEIGHT * TEX_CHANNELS);
+
+    // textures
+    u8* font = (u8*) malloc(TEX_WIDTH * TEX_HEIGHT * TEX_CHANNELS);
     for (u16 y = 0; y < TEX_HEIGHT; y++) {
         for (u16 x = 0; x < TEX_WIDTH; x++) {
-            image[idx(x,y,R)] = 0;
-            image[idx(x,y,G)] = 0;
-            image[idx(x,y,B)] = 0;
-            image[idx(x,y,A)] = 255;
+            font[idx(x,y,R)] = 255;
+            font[idx(x,y,G)] = 255;
+            font[idx(x,y,B)] = 255;
+            font[idx(x,y,A)] = 255;
         }
     }
 
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
+    GLuint tex_font;
+    glGenTextures(1, &tex_font);
+    glBindTexture(GL_TEXTURE_2D, tex_font);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -409,8 +410,26 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TEX_WIDTH, TEX_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TEX_WIDTH, TEX_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, font);
     glGenerateMipmap(GL_TEXTURE_2D);
+
+
+    u8 pencil_data[81] = {0};
+    for (u32 i = 0; i < 81; i++) { pencil_data[i] = 0; }
+
+    GLuint tex_pencil;
+    glGenTextures(1, &tex_pencil);
+    glBindTexture(GL_TEXTURE_2D, tex_pencil);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 9, 9, 0, GL_RED, GL_UNSIGNED_BYTE, &pencil_data[0]);
+
 
     // shaders
     #define PATH_SHADER_VERT "./shaders/main.vert"
@@ -426,6 +445,9 @@ void main() {
     GLuint u_proj  = glGetUniformLocation(shader_program, "proj");
     GLuint u_model = glGetUniformLocation(shader_program, "model");
 
+    GLuint u_font   = glGetUniformLocation(shader_program, "font");
+    GLuint u_pencil = glGetUniformLocation(shader_program, "pencil");
+
     // ortho
     mat4 proj;
     identity(&proj);
@@ -434,8 +456,7 @@ void main() {
 
     mat4 scale;
     identity(&scale);
-    f32 tex_ratio = f32(TEX_WIDTH) / f32(TEX_HEIGHT);
-    scale_mat4(&scale, {tex_ratio, 1.0f, 1.0f});
+    scale_mat4(&scale, {0.85f, 0.85f, 0.85f});
 
     glUseProgram(shader_program);
     glBindVertexArray(vao);
@@ -473,8 +494,13 @@ void main() {
             }
             else {
                 printf("[Success] Shaders recompiled ... \n");
+
                 u_proj  = glGetUniformLocation(shader_program, "proj");
                 u_model = glGetUniformLocation(shader_program, "model");
+
+                GLuint u_font   = glGetUniformLocation(shader_program, "font");
+                GLuint u_pencil = glGetUniformLocation(shader_program, "pencil");
+
                 glDeleteProgram(old_shader_program);
                 glUseProgram(shader_program);
             }
@@ -496,11 +522,17 @@ void main() {
         glUniformMatrix4fv(u_proj,  1, GL_FALSE, &proj.a[0]);
         glUniformMatrix4fv(u_model, 1, GL_FALSE, &scale.a[0]);
 
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, TEX_WIDTH, TEX_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, image);
+        glUniform1i(u_font, 0);
+        glUniform1i(u_pencil, 1);
+
+        glActiveTexture(GL_TEXTURE0 + 0);
+        glBindTexture(GL_TEXTURE_2D, tex_font);
+
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, tex_pencil);
 
         // render
-        glClearColor(0.02f, 0.09f, 0.13f, 1.0f);
+        glClearColor(0.9f, 0.9f, 0.9f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
