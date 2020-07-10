@@ -10,16 +10,22 @@ uniform sampler2D font;
 uniform sampler2D pencil;
 
 void main() {
+    float dim_size = 1.0 / 9.0;
+    float offset   = dim_size / 2.0;
+    vec2 id = vec2(f_uv / dim_size);
+
+
     // digits
     frag_color = vec4(vec3(0.97), 1.0);
 
-    float dim_size = 1.0 / 9.0;
-    vec2 id = vec2(f_uv / dim_size);
 
-    //// pencil mode
-    //float pencil_mode = texture(pencil, vec2(0.5, 0.5)).a;
-    //frag_color.rgb = vec3(pencil_mode);
-    //return;
+    
+
+    // pencil mode -- FIXME: texture sampling is wrong
+    // vec2 tex_coord = vec2(offset) + floor(id)*dim_size;
+    // float pencil_mode = texture(pencil, tex_coord).r;
+    // frag_color.rgb = vec3(pencil_mode);
+    // return;
 
 
 

@@ -415,7 +415,8 @@ void main() {
 
 
     u8 pencil_data[81] = {0};
-    for (u32 i = 0; i < 81; i++) { pencil_data[i] = 0; }
+    pencil_data[0] = 255;
+    pencil_data[80] = 255;
 
     GLuint tex_pencil;
     glGenTextures(1, &tex_pencil);
@@ -428,7 +429,7 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 9, 9, 0, GL_RED, GL_UNSIGNED_BYTE, &pencil_data[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 9, 9, 0, GL_RED, GL_UNSIGNED_BYTE, &pencil_data[0]);
 
 
     // shaders
