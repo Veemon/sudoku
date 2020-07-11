@@ -6,26 +6,23 @@ in vec2 f_uv;
 
 layout (location = 0) out vec4 frag_color;
 
-uniform sampler2D font;
-uniform sampler2D pencil;
+uniform sampler2D  font;
+uniform usampler2D pencil;
 
 void main() {
-    float dim_size = 1.0 / 9.0;
-    float offset   = dim_size / 2.0;
-    vec2 id = vec2(f_uv / dim_size);
+    frag_color = vec4(vec3(0.97), 1.0); // base color
+
 
 
     // digits
-    frag_color = vec4(vec3(0.97), 1.0);
+    vec2 id = floor(vec2((f_uv - 1e-6) * 9));
 
+    // rescale to account for texture size
+    const float dim_size = 1.0 / 16.0;
+    const float offset   = dim_size * 0.5;
 
-    
-
-    // pencil mode -- FIXME: texture sampling is wrong
-    // vec2 tex_coord = vec2(offset) + floor(id)*dim_size;
-    // float pencil_mode = texture(pencil, tex_coord).r;
-    // frag_color.rgb = vec3(pencil_mode);
-    // return;
+    vec2  info_coord = id*dim_size + offset;
+    uint  info       = texture(pencil, info_coord).r;   
 
 
 
@@ -33,8 +30,8 @@ void main() {
     float eps = 0.005;
 
     float shade_mask;
-    float shade_m1  = smoothstep(3.0-eps, 3.0, id.x) * smoothstep(id.x-eps, id.x, 6.0);
-    float shade_m2  = smoothstep(3.0-eps, 3.0, id.y) * smoothstep(id.y-eps, id.y, 6.0);
+    float shade_m1  = smoothstep(3.0-eps, 3.0, id.x) * smoothstep(id.x-eps, id.x, 5.0);
+    float shade_m2  = smoothstep(3.0-eps, 3.0, id.y) * smoothstep(id.y-eps, id.y, 5.0);
     shade_mask      = shade_m1 + shade_m2;
     shade_mask      = clamp(shade_mask, 0.0, 1.0);
     shade_mask     -= shade_m1 * shade_m2;
@@ -70,4 +67,5 @@ void main() {
         frag_color.rgb *= (1.0 - mask);
         frag_color.rgb += vec3(s) * mask;
     }
+
 }

@@ -114,19 +114,6 @@ void scale_mat4(mat4* m, vec3 v) {
 }
 
 
-// texture
-#define TEX_WIDTH  64
-#define TEX_HEIGHT 48
-#define TEX_CHANNELS 4
-
-#define R   0
-#define G   1
-#define B   2
-#define A   3
-
-u32 idx(u32 x, u32 y, u32 z) {
-    return (y*TEX_WIDTH*TEX_CHANNELS) + (x*TEX_CHANNELS) + z;
-}
 
 
 
@@ -389,13 +376,16 @@ void main() {
 
 
     // textures
-    u8* font = (u8*) malloc(TEX_WIDTH * TEX_HEIGHT * TEX_CHANNELS);
-    for (u16 y = 0; y < TEX_HEIGHT; y++) {
-        for (u16 x = 0; x < TEX_WIDTH; x++) {
-            font[idx(x,y,R)] = 255;
-            font[idx(x,y,G)] = 255;
-            font[idx(x,y,B)] = 255;
-            font[idx(x,y,A)] = 255;
+    #define FONT_PAD      4
+    #define FONT_DIM      32
+    #define FONT_WIDTH    (FONT_DIM + FONT_PAD) * 9
+
+    u8* font = (u8*) malloc(FONT_WIDTH * FONT_DIM);
+    for (u16 n = 0; n < 10; n++) {
+        for (u16 j = 0; j < FONT_DIM; j++) {
+            for (u16 i = 0; i < FONT_DIM; i++) {
+                font[j*(FONT_DIM+FONT_PAD) + i] = 0;
+            }
         }
     }
 
@@ -410,13 +400,25 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TEX_WIDTH, TEX_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, font);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FONT_WIDTH, FONT_DIM, 0, GL_RED, GL_UNSIGNED_BYTE, font);
     glGenerateMipmap(GL_TEXTURE_2D);
 
 
-    u8 pencil_data[81] = {0};
-    pencil_data[0] = 255;
-    pencil_data[80] = 255;
+    /*
+       bottom --  10 bit  - numbers pencilled / active number
+       top    --  1  bit  - pencil mode active
+    */
+    #define PENCIL_DIM        16
+    #define PENCIL_SIZE       PENCIL_DIM * PENCIL_DIM
+    #define IDX(x,y)          (y*PENCIL_DIM) + x
+
+    u16 pencil_data[PENCIL_SIZE] = {};
+    for (u16 i = 0; i < PENCIL_SIZE; i++) { 
+        pencil_data[i] = 0b1000001111111111; 
+    }
+
+    pencil_data[IDX(0,0)] = 0;
+    pencil_data[IDX(8,8)] = 0;
 
     GLuint tex_pencil;
     glGenTextures(1, &tex_pencil);
@@ -429,7 +431,9 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 9, 9, 0, GL_RED, GL_UNSIGNED_BYTE, &pencil_data[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, PENCIL_DIM, PENCIL_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, &pencil_data[0]);
+
+
 
 
     // shaders
