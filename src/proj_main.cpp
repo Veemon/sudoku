@@ -419,8 +419,15 @@ void main() {
         pencil_data[i] = 0b1000001111111111; 
     }
 
-    pencil_data[IDX(0,0)] = 0;
-    pencil_data[IDX(8,8)] = 0;
+    /// FIXME:  pencil digits
+    pencil_data[IDX(8,0)] = 0b1000001000000000;
+    pencil_data[IDX(8,1)] = 0b1000001100000000;
+    pencil_data[IDX(8,2)] = 0b1000001010000000;
+
+    /// FIXME:  full digits
+    pencil_data[IDX(0,0)] = 1;
+    pencil_data[IDX(0,8)] = 5;
+    pencil_data[IDX(8,8)] = 9;
 
     GLuint tex_pencil;
     glGenTextures(1, &tex_pencil);

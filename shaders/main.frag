@@ -20,8 +20,12 @@ void main() {
     const float dim_size = 1.0 / 16.0;         // rescale to account for texture size
     const float offset   = dim_size * 0.5;
 
-    vec2  info_coord = id*dim_size + offset;
-    uint  info       = texture(pencil, info_coord).r;   
+    vec2 info_coord = id*dim_size + offset;
+    vec2 cell_coord = 9.0*f_uv - id;
+    vec2 cell_id    = floor((cell_coord - 1e-6) * 3);
+
+    uint  info        = texture(pencil, info_coord).r;
+    bool  pencil_mode = bool(info & 0x8000);
 
 
 
@@ -41,15 +45,30 @@ void main() {
 
 
     // digits
-    if (info > 0x8000) {
-        frag_color.r = 1.0;
-        frag_color.g -= 0.6;
-        frag_color.b -= 0.6;
+    if (pencil_mode) {
+        frag_color.rgb = vec3(0.8);
+
+        vec2 outer = vec2(8,0);
+        vec2 inner = vec2(2,2);
+
+        float outer_cell_mask = 1.0;
+        outer_cell_mask *= step(outer.x, id.x) * step(id.x, outer.x);
+        outer_cell_mask *= step(outer.y, id.y) * step(id.y, outer.y);
+
+        float cell_mask = 1.0;
+        cell_mask *= step(inner.x, cell_id.x) * step(cell_id.x, inner.x);
+        cell_mask *= step(inner.y, cell_id.y) * step(cell_id.y, inner.y);
+
+        frag_color.r += outer_cell_mask * cell_mask;
+
+        //if ( bool(info & (1<<9)) ) { frag_color.rgb = vec3(1.0); }
+        //if ( bool(info & (1<<8)) ) { frag_color.rgb = vec3(0.5); }
+        //if ( bool(info & (1<<7)) ) { frag_color.rgb = vec3(0.2); }
     }
     else {
-        frag_color.r -= 0.6;
-        frag_color.g -= 0.6;
-        frag_color.b = 1.0;
+        if (info == 1) { frag_color.rgb = vec3(1.0); }
+        if (info == 5) { frag_color.rgb = vec3(0.5); }
+        if (info == 9) { frag_color.rgb = vec3(0.2); }
     }
 
 
@@ -62,7 +81,7 @@ void main() {
     vec2 uv;
     float s, w;
     float mask;
-    for (int i = 0; i < 3; i++) {
+    for (int i = int(!pencil_mode); i < 3; i++) {
         int j = 2 - i;
 
         uv = mod(f_uv, r[j]) / r[j];
