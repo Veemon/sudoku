@@ -386,9 +386,8 @@ void main() {
     // textures
     #define PATH_TTF_FONT "./res/LemonMilk.otf"
 
-    #define FONT_PAD      4
     #define FONT_DIM      128
-    #define FONT_WIDTH    (FONT_DIM + FONT_PAD) * 9
+    #define FONT_WIDTH    FONT_DIM * 9
 
     u8* font_data = (u8*) malloc(FONT_WIDTH * FONT_DIM);
     for (u32 i = 0; i < FONT_WIDTH*FONT_DIM; i++) {
@@ -428,9 +427,9 @@ void main() {
             
             for (u32 j = 0; j < height; j++) {
                 for (u32 i = 0; i < width; i++) {
-                    u32 idx = font_idx*(FONT_DIM + FONT_PAD) +            // center top row to font index
-                        ((j + (FONT_DIM/2 - height/2)) * FONT_WIDTH) +
-                        (i + (FONT_DIM/2 - width/2) + x_offset);
+                    u32 idx = font_idx*FONT_DIM +   // center top row to font index
+                              ((j + (FONT_DIM/2 - height/2)) * FONT_WIDTH) +
+                              (i + (FONT_DIM/2 - width/2) + x_offset);
                     font_data[idx] = bitmap[(j*width) + i];
                 }
             }

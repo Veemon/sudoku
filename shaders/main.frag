@@ -10,9 +10,9 @@ uniform sampler2D  font;
 uniform usampler2D pencil;
 
 
-vec3 fetch_number(float n, vec2 ref_coord) {
+float fetch_number(float n, vec2 ref_coord) {
     ref_coord.x = ref_coord.x * (1.0/9.0) + ((n-1.0)/9.0);
-    return vec3(1.0 - texture(font, ref_coord).r);
+    return texture(font, ref_coord).r;
 }
 
 
@@ -72,12 +72,18 @@ void main() {
         //if ( bool(info & (1<<7)) ) { }
     }
     else {
-        vec3 status_color = vec3(0.2, 0.4, 0.8);
-        if (info == 1) { 
-            frag_color.rgb = fetch_number(float(3), cell_coord) + status_color; 
+        vec3 status_color = vec3(0.1, 0.5, 0.7);
+        for (int i = 1; i < 10; i++) {
+            if (info == i) {
+                float m1 = fetch_number(float(i), cell_coord + vec2(-0.02, -0.015)); 
+                float m2 = fetch_number(float(i), cell_coord); 
+                float mask = clamp(m1*0.4 + m2, 0.0, 1.0);
+
+                frag_color.rgb *= 1 - mask;
+                frag_color.rgb += mask * status_color;
+                break;
+            }
         }
-        //if (info == 5) { frag_color.rgb *= vec3(0.5); }
-        //if (info == 9) { frag_color.rgb *= vec3(0.2); }
     }
 
 
