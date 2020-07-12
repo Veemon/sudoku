@@ -12,6 +12,8 @@ uniform usampler2D pencil;
 void main() {
     frag_color = vec4(vec3(0.97), 1.0); // base color
 
+    // FIXME: testing font
+    frag_color.rgb = vec3(texture(font, f_uv).r);
 
 
     // identification (welcome to arstotzka)
@@ -45,31 +47,33 @@ void main() {
 
 
     // digits
+#if 0
     if (pencil_mode) {
         frag_color.rgb = vec3(0.8);
 
         vec2 outer = vec2(8,0);
         vec2 inner = vec2(2,2);
 
-        float outer_cell_mask = 1.0;
-        outer_cell_mask *= step(outer.x, id.x) * step(id.x, outer.x);
-        outer_cell_mask *= step(outer.y, id.y) * step(id.y, outer.y);
+        float outer_mask = 1.0;
+        outer_mask *= step(outer.x, id.x) * step(id.x, outer.x);
+        outer_mask *= step(outer.y, id.y) * step(id.y, outer.y);
 
         float cell_mask = 1.0;
         cell_mask *= step(inner.x, cell_id.x) * step(cell_id.x, inner.x);
         cell_mask *= step(inner.y, cell_id.y) * step(cell_id.y, inner.y);
 
-        frag_color.r += outer_cell_mask * cell_mask;
+        float mask = outer_mask * cell_mask;
 
-        //if ( bool(info & (1<<9)) ) { frag_color.rgb = vec3(1.0); }
-        //if ( bool(info & (1<<8)) ) { frag_color.rgb = vec3(0.5); }
-        //if ( bool(info & (1<<7)) ) { frag_color.rgb = vec3(0.2); }
+        if ( bool(info & (1<<9)) ) { }
+        if ( bool(info & (1<<8)) ) { }
+        if ( bool(info & (1<<7)) ) { }
     }
     else {
-        if (info == 1) { frag_color.rgb = vec3(1.0); }
-        if (info == 5) { frag_color.rgb = vec3(0.5); }
-        if (info == 9) { frag_color.rgb = vec3(0.2); }
+        if (info == 1) { frag_color.rgb *= vec3(0.7); }
+        if (info == 5) { frag_color.rgb *= vec3(0.5); }
+        if (info == 9) { frag_color.rgb *= vec3(0.2); }
     }
+#endif
 
 
 

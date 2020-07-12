@@ -9,6 +9,12 @@
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 // system
 #include "stdio.h"
 #include "stdlib.h"
@@ -378,17 +384,62 @@ void main() {
 
 
     // textures
+    #define PATH_TTF_FONT "./res/LemonMilk.otf"
+
     #define FONT_PAD      4
-    #define FONT_DIM      32
+    #define FONT_DIM      128
     #define FONT_WIDTH    (FONT_DIM + FONT_PAD) * 9
 
-    u8* font = (u8*) malloc(FONT_WIDTH * FONT_DIM);
-    for (u16 n = 0; n < 10; n++) {
-        for (u16 j = 0; j < FONT_DIM; j++) {
-            for (u16 i = 0; i < FONT_DIM; i++) {
-                font[j*(FONT_DIM+FONT_PAD) + i] = 0;
+    u8* font_data = (u8*) malloc(FONT_WIDTH * FONT_DIM);
+    for (u32 i = 0; i < FONT_WIDTH*FONT_DIM; i++) {
+        font_data[i] = 0;
+    }
+
+    {
+        u64 length;
+        FILE* font_file = fopen(PATH_TTF_FONT, "rb");
+
+        fseek(font_file, 0, SEEK_END);
+        length = ftell(font_file);
+        fseek(font_file, 0, SEEK_SET);
+
+        u8* font_file_contents = (u8*) malloc(length + 1);
+        fread(font_file_contents, 1, length, font_file);
+        fclose(font_file);
+        font_file_contents[length] = '\0';
+
+        stbtt_fontinfo font;
+        stbtt_InitFont(&font, font_file_contents, stbtt_GetFontOffsetForIndex(font_file_contents, 0));
+
+        i32 width;
+        i32 height;
+        i32 x_offset;
+        i32 y_offset;    
+        u8* bitmap;
+        for (u32 font_idx = 0; font_idx < 9; font_idx++)
+        {
+            
+            bitmap = stbtt_GetCodepointBitmap(&font, 0, stbtt_ScaleForPixelHeight(&font, FONT_DIM),
+                                                          font_idx + '1', 
+                                                          &width, 
+                                                          &height, 
+                                                          &x_offset, 
+                                                          &y_offset);
+            
+            for (u32 j = 0; j < height; j++) {
+                for (u32 i = 0; i < width; i++) {
+                    u32 idx = font_idx*(FONT_DIM + FONT_PAD) +            // center top row to font index
+                        ((j + (FONT_DIM/2 - height/2)) * FONT_WIDTH) +
+                        (i + (FONT_DIM/2 - width/2) + x_offset);
+                    font_data[idx] = bitmap[(j*width) + i];
+                }
             }
+
+            free(bitmap);
         }
+
+        free(font_file_contents);
+
     }
 
     GLuint tex_font;
@@ -402,7 +453,7 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FONT_WIDTH, FONT_DIM, 0, GL_RED, GL_UNSIGNED_BYTE, font);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FONT_WIDTH, FONT_DIM, 0, GL_RED, GL_UNSIGNED_BYTE, font_data);
     glGenerateMipmap(GL_TEXTURE_2D);
 
 
