@@ -14,11 +14,10 @@ void main() {
 
 
 
-    // digits
+    // identification (welcome to arstotzka)
     vec2 id = floor(vec2((f_uv - 1e-6) * 9));
 
-    // rescale to account for texture size
-    const float dim_size = 1.0 / 16.0;
+    const float dim_size = 1.0 / 16.0;         // rescale to account for texture size
     const float offset   = dim_size * 0.5;
 
     vec2  info_coord = id*dim_size + offset;
@@ -38,6 +37,20 @@ void main() {
     
     frag_color.rgb *= 1 - shade_mask;
     frag_color.rgb += shade_mask * vec3(0.8);
+
+
+
+    // digits
+    if (info > 0x8000) {
+        frag_color.r = 1.0;
+        frag_color.g -= 0.6;
+        frag_color.b -= 0.6;
+    }
+    else {
+        frag_color.r -= 0.6;
+        frag_color.g -= 0.6;
+        frag_color.b = 1.0;
+    }
 
 
 

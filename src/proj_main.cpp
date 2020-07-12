@@ -318,7 +318,6 @@ void main() {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    // input handlers
     glfwSetCursorPosCallback(window, mouse_move_callback);
 	glfwSetMouseButtonCallback(window, mouse_click_callback);
 	glfwSetScrollCallback(window, scroll_callback);
@@ -334,6 +333,8 @@ void main() {
     // opengl settings
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+
 
     // geometry
     f32 quad_vertices[] = {
@@ -373,6 +374,7 @@ void main() {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glBindVertexArray(0);  
+
 
 
     // textures
@@ -453,7 +455,9 @@ void main() {
     GLuint u_font   = glGetUniformLocation(shader_program, "font");
     GLuint u_pencil = glGetUniformLocation(shader_program, "pencil");
 
-    // ortho
+
+
+    // orthogonal projection
     mat4 proj;
     identity(&proj);
     f32 window_ratio = f32(window_width) / f32(window_height);
@@ -466,6 +470,8 @@ void main() {
     glUseProgram(shader_program);
     glBindVertexArray(vao);
 
+
+
     // timing
     f32 total_time = 0.0;
     LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
@@ -473,6 +479,9 @@ void main() {
     delta_ms.QuadPart = 0;
 
     f32 delta_s = 0.0;
+
+    f32 render_wait     = 1.0 / 60.0f;
+    f32 render_timer    = render_wait;
 
     f32 recompile_wait  = 1.0;
     f32 recompile_timer = recompile_wait;
@@ -503,8 +512,8 @@ void main() {
                 u_proj  = glGetUniformLocation(shader_program, "proj");
                 u_model = glGetUniformLocation(shader_program, "model");
 
-                GLuint u_font   = glGetUniformLocation(shader_program, "font");
-                GLuint u_pencil = glGetUniformLocation(shader_program, "pencil");
+                u_font   = glGetUniformLocation(shader_program, "font");
+                u_pencil = glGetUniformLocation(shader_program, "pencil");
 
                 glDeleteProgram(old_shader_program);
                 glUseProgram(shader_program);
@@ -537,11 +546,16 @@ void main() {
         glBindTexture(GL_TEXTURE_2D, tex_pencil);
 
         // render
-        glClearColor(0.9f, 0.9f, 0.9f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        if (render_timer >= render_wait) {
+            render_timer -= render_wait;
 
+            glClearColor(0.9f, 0.9f, 0.9f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        }
         glfwSwapBuffers(window);
+
+
 
         // timing
         QueryPerformanceCounter(&end_time);
@@ -551,6 +565,7 @@ void main() {
         delta_s = f32(delta_ms.QuadPart) / 1000.f;
         total_time += delta_s;
 
+        render_timer    += delta_s;
         recompile_timer += delta_s;
     }
 
