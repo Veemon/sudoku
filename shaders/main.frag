@@ -37,15 +37,18 @@ void main() {
     bool  error_flag   = bool(info & 0x4000);
     bool  static_flag  = bool(info & 0x2000);
     bool  entered_flag = !(static_flag || error_flag);
+    float cursor       = float((info & 0x1000)>>12);
 
     vec3 static_color  = vec3(0.1, 0.1, 0.1);
-    vec3 entered_color = vec3(0.1, 0.3, 0.5);
+    vec3 entered_color = vec3(0.20, 0.50, 0.65);
     vec3 error_color   = vec3(0.6, 0.1, 0.1);
 
     vec3 status_color = vec3(0.0);
     status_color     += float(static_flag)  * static_color;
     status_color     += float(entered_flag) * entered_color;
     status_color     += float(error_flag)   * error_color;
+
+    vec3 cursor_color = vec3(0.65) + status_color*0.7;
 
 
 
@@ -64,6 +67,12 @@ void main() {
 
 
 
+    // cursor
+    frag_color.rgb *= 1 - cursor;
+    frag_color.rgb += cursor * cursor_color;
+
+
+
     // digits
     {
         uint nn = 0;
@@ -73,7 +82,7 @@ void main() {
 
             // check if our cell has a number
             uint cell_n = uint(cell_id.y)*3 + uint(cell_id.x);
-            nn = ((info & (1<<cell_n))>>cell_n) * (cell_n+1);
+            nn = (((0x1FF&info) & (1<<cell_n))>>cell_n) * (cell_n+1);
             
             // min-max norm
             ref_coord = (f_uv*27.0) - (grid_id*3.0 + cell_id);
@@ -81,14 +90,16 @@ void main() {
         }
         else {
             for (uint i = 0; i < 9; i++) {
-               nn += ((info & (1<<i))>>i) * (i+1);
+               nn += (((0x1FF&info) & (1<<i))>>i) * (i+1);
             }
         }
 
         float n = float(nn);
 
-        float m1 = fetch_number(n, ref_coord + vec2(-0.02, -0.015)); 
-        float m2 = fetch_number(n, ref_coord); 
+        float dist = 0.025;
+
+        float m1 = fetch_number(n, ref_coord + vec2(-dist, -dist)*cursor) * cursor; // TODO: use time to make this pop
+        float m2 = fetch_number(n, ref_coord + vec2( dist,  dist)*cursor); 
         float mask = clamp(m1*0.4 + m2, 0.0, 1.0);
 
         frag_color.rgb *= 1.0 - mask;
@@ -121,7 +132,7 @@ void main() {
         mask = clamp(mask, 0.0, 1.0);
 
         frag_color.rgb *= (1.0 - mask);
-        frag_color.rgb += vec3(s) * mask;
+        frag_color.rgb += mix(vec3(s) * mask, 0.9 * status_color * mask, cursor);
     }
 
 }

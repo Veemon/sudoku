@@ -254,12 +254,39 @@ GLuint build_shader_program(const char* vertex_path, const char* fragment_path, 
 
 
 
+#define INPUT_QUEUE_LEN           256
+#define INPUT_TYPE_KEY_PRESS      1
+#define INPUT_TYPE_MOUSE_PRESS    2
+#define INPUT_TYPE_MOUSE_MOVE     3
 
-struct Controls {
-    bool keys[350]        = { false };
-    bool mouse_buttons[2] = { false };
-    f32 mouse_position[2] = { 0.0f };
-} controls;
+struct InputEvent {
+    u8  type              = 0;
+    u8  mouse_button      = 0;
+    i32 action            = 0;
+    i32 key               = 0;
+    i32 mod               = 0;
+    f32 mouse_position[2] = {0.0f};
+};
+
+u32 input_index = 0;
+InputEvent input_queue[INPUT_QUEUE_LEN] = {0};
+
+#define IS_KEY_REPEAT event.action == GLFW_REPEAT
+#define IS_KEY_DOWN   event.action == GLFW_PRESS
+#define IS_KEY_UP     event.action == GLFW_RELEASE
+#define KEY_DOWN(x)   (event.action == GLFW_PRESS  ) && (event.key == x)
+#define KEY_UP(x)     (event.action == GLFW_RELEASE) && (event.key == x)
+
+#define LOG_EVENT(x) {\
+    printf("type                %u\n", x.type         );\
+    printf("mouse_button        %u\n", x.mouse_button );\
+    printf("action              %d\n", x.action       );\
+    printf("key                 %d\n", x.key          );\
+    printf("mod                 %d\n", x.mod          );\
+    printf("mouse_position      %f   %f\n\n", x.mouse_position[0], x.mouse_position[1]);\
+}
+
+
 
 
 static void glfw_error_callback(int error, const char* description) {
@@ -267,22 +294,32 @@ static void glfw_error_callback(int error, const char* description) {
 }
 
 static void mouse_move_callback(GLFWwindow* window, f64 xpos, f64 ypos) {
-    controls.mouse_position[0] = xpos;
-    controls.mouse_position[1] = ypos;
-}
-
-static void mouse_click_callback(GLFWwindow* window, i32 button, i32 action, i32 mods) {
-    controls.mouse_buttons[0] = (button == GLFW_MOUSE_BUTTON_LEFT  && action == GLFW_PRESS);
-    controls.mouse_buttons[1] = (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS);
-}
-
-static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
+    input_queue[input_index].type = INPUT_TYPE_MOUSE_MOVE;
+    input_queue[input_index].mouse_position[0] = xpos;
+    input_queue[input_index].mouse_position[1] = ypos;
+    input_index++;
 }
 
 static void key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i32 mods) {
     if (key >= 0) {
-        controls.keys[key] = (action == GLFW_PRESS || action == GLFW_REPEAT);
+        input_queue[input_index].type     = INPUT_TYPE_KEY_PRESS;
+        input_queue[input_index].action   = action;
+        input_queue[input_index].mod      = mods;
+        input_queue[input_index].key      = key;
+        input_index++;
     }
+}
+
+static void mouse_click_callback(GLFWwindow* window, i32 button, i32 action, i32 mods) {
+    input_queue[input_index].type          = INPUT_TYPE_MOUSE_PRESS;
+    input_queue[input_index].mouse_button |= (button == GLFW_MOUSE_BUTTON_LEFT)  * 0x2;
+    input_queue[input_index].mouse_button |= (button == GLFW_MOUSE_BUTTON_RIGHT) * 0x1;
+    input_queue[input_index].action        = action;
+    input_queue[input_index].mod           = mods;
+    input_index++;
+}
+
+static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 }
 
 
@@ -461,6 +498,7 @@ void main() {
        bottom --  9  bit  - numbers active numbers
        top    --  1  bit  - pencil mode active
     */
+    #define BOARD_EMPTY        0
     #define BOARD_1            0x1
     #define BOARD_2            0x2
     #define BOARD_3            0x4
@@ -475,6 +513,7 @@ void main() {
     #define BOARD_FLAG_PENCIL  0x8000
     #define BOARD_FLAG_ERROR   0x4000
     #define BOARD_FLAG_STATIC  0x2000
+    #define BOARD_FLAG_CURSOR  0x1000
 
     #define BOARD_DIM        16
     #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
@@ -482,19 +521,8 @@ void main() {
 
     u16 board_data[BOARD_SIZE] = {};
     for (u16 i = 0; i < BOARD_SIZE; i++) { 
-        board_data[i] = 0; 
+        board_data[i] = BOARD_EMPTY; 
     }
-
-    /// FIXME:  pencil digits
-    board_data[IDX(8,0)] = BOARD_FLAG_PENCIL | BOARD_1;
-    board_data[IDX(8,1)] = BOARD_FLAG_PENCIL | BOARD_1 | BOARD_5 | BOARD_9;
-    board_data[IDX(8,2)] = BOARD_FLAG_PENCIL | BOARD_ALL;
-
-    /// FIXME:  full digits
-    board_data[IDX(0,0)] = BOARD_FLAG_STATIC | BOARD_1;
-    board_data[IDX(1,4)] = BOARD_FLAG_STATIC | BOARD_1;
-    board_data[IDX(0,8)] = BOARD_FLAG_ERROR  | BOARD_2;
-    board_data[IDX(8,8)] = BOARD_3;
 
     GLuint tex_board;
     glGenTextures(1, &tex_board);
@@ -560,39 +588,85 @@ void main() {
     f32 recompile_wait  = 1.0;
     f32 recompile_timer = recompile_wait;
 
+    // FIXME
+    u8 cursor_x = 4;
+    u8 cursor_y = 4;
+    board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+
     while (!glfwWindowShouldClose(window))
     {
+        // input handling
         QueryPerformanceCounter(&start_time);
         glfwPollEvents();
 
-        // quit
-        if (controls.keys[GLFW_KEY_ESCAPE]) {
-            return;
-        }
+        for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
+            u8 handled = 0;
+            InputEvent event = input_queue[event_idx];
 
-        // recompile shaders
-        if (controls.keys[GLFW_KEY_F5] && recompile_timer > recompile_wait) {
-            recompile_timer = 0;
-            GLuint old_shader_program = shader_program;
-            shader_program = build_shader_program(PATH_SHADER_VERT, PATH_SHADER_FRAG, &info_log);
-            if (shader_program == NULL) {
-                printf("[Error] Shader compilation failed.\n%s\n", info_log);
-                shader_program = old_shader_program;
-                free(info_log);
+            if (event.type == INPUT_TYPE_KEY_PRESS) {
+                // quit
+                if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
+                    return;
+                }
+
+                // keyboard cursor
+                if (!handled && IS_KEY_DOWN) {
+                    board_data[IDX(cursor_x, cursor_y)] &= ~BOARD_FLAG_CURSOR;
+                    if      (event.key == GLFW_KEY_LEFT  || event.key == GLFW_KEY_A) { cursor_x = (!cursor_x)     ? 8 : cursor_x-1; handled = 1; }
+                    else if (event.key == GLFW_KEY_RIGHT || event.key == GLFW_KEY_D) { cursor_x = (cursor_x == 8) ? 0 : cursor_x+1; handled = 1; }
+                    else if (event.key == GLFW_KEY_UP    || event.key == GLFW_KEY_W) { cursor_y = (!cursor_y)     ? 8 : cursor_y-1; handled = 1; }
+                    else if (event.key == GLFW_KEY_DOWN  || event.key == GLFW_KEY_S) { cursor_y = (cursor_y == 8) ? 0 : cursor_y+1; handled = 1; }
+                    board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+                }
+
+                // digit placement
+                if (!handled && IS_KEY_DOWN) {
+                    if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
+                        // SHIFT - key places it out of pencil mode
+                        u32 idx = IDX(cursor_x, cursor_y);
+                        if (event.mod & GLFW_MOD_SHIFT) { board_data[idx] &= ~BOARD_FLAG_PENCIL; } // clear pencil flag
+                        if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
+                        board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
+                        handled = 1;
+                    }
+                }
+
+                // keyboard pencil mode
+                if (!handled && KEY_DOWN(GLFW_KEY_SPACE)) {
+                    board_data[IDX(cursor_x, cursor_y)] ^= BOARD_FLAG_PENCIL;
+                    handled = 1;
+                }
+
+                // recompile shaders
+                if (!handled && KEY_UP(GLFW_KEY_F5) && recompile_timer > recompile_wait) {
+                    handled = 1;
+                    recompile_timer = 0;
+
+                    GLuint old_shader_program = shader_program;
+                    shader_program = build_shader_program(PATH_SHADER_VERT, PATH_SHADER_FRAG, &info_log);
+                    if (shader_program == NULL) {
+                        printf("[Error] Shader compilation failed.\n%s\n", info_log);
+                        shader_program = old_shader_program;
+                        free(info_log);
+                    }
+                    else {
+                        printf("[Success] Shaders recompiled ... \n");
+
+                        u_proj  = glGetUniformLocation(shader_program, "proj");
+                        u_model = glGetUniformLocation(shader_program, "model");
+
+                        u_font  = glGetUniformLocation(shader_program, "font");
+                        u_board = glGetUniformLocation(shader_program, "board");
+
+                        glDeleteProgram(old_shader_program);
+                        glUseProgram(shader_program);
+                    }
+                }
             }
-            else {
-                printf("[Success] Shaders recompiled ... \n");
-
-                u_proj  = glGetUniformLocation(shader_program, "proj");
-                u_model = glGetUniformLocation(shader_program, "model");
-
-                u_font  = glGetUniformLocation(shader_program, "font");
-                u_board = glGetUniformLocation(shader_program, "board");
-
-                glDeleteProgram(old_shader_program);
-                glUseProgram(shader_program);
-            }
         }
+        input_index = 0;
+
+
 
         // window - resizing
         i32 _width = 0, _height = 0;
@@ -606,6 +680,8 @@ void main() {
             project_orthographic(&proj, -window_ratio, window_ratio, -1.0f, 1.0f, 0.0f, 100.0f);
         }
 
+
+
         // uniforms
         glUniformMatrix4fv(u_proj,  1, GL_FALSE, &proj.a[0]);
         glUniformMatrix4fv(u_model, 1, GL_FALSE, &scale.a[0]);
@@ -618,6 +694,8 @@ void main() {
 
         glActiveTexture(GL_TEXTURE0 + 1);
         glBindTexture(GL_TEXTURE_2D, tex_board);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, BOARD_DIM, BOARD_DIM, GL_RED_INTEGER, GL_UNSIGNED_SHORT, &board_data[0]);
+
 
         // render
         if (render_timer >= render_wait) {
