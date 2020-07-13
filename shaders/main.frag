@@ -7,7 +7,7 @@ in vec2 f_uv;
 layout (location = 0) out vec4 frag_color;
 
 uniform sampler2D  font;
-uniform usampler2D pencil;
+uniform usampler2D board;
 
 
 float fetch_number(float n, vec2 ref_coord) {
@@ -17,21 +17,35 @@ float fetch_number(float n, vec2 ref_coord) {
 
 
 void main() {
-    frag_color = vec4(vec3(0.97), 1.0); // base color
+    // base color
+    frag_color = vec4(vec3(0.97), 1.0); 
+
 
 
     // identification (welcome to arstotzka)
-    vec2 id = floor(vec2((f_uv - 1e-6) * 9));
+    vec2 grid_id = floor(vec2((f_uv - 1e-6) * 9));
 
     const float dim_size = 1.0 / 16.0;         // rescale to account for texture size
     const float offset   = dim_size * 0.5;
 
-    vec2 info_coord = id*dim_size + offset;
-    vec2 cell_coord = 9.0*f_uv - id;
+    vec2 info_coord = grid_id*dim_size + offset;
+    vec2 cell_coord = 9.0*f_uv - grid_id;
     vec2 cell_id    = floor((cell_coord - 1e-6) * 3);
 
-    uint  info        = texture(pencil, info_coord).r;
-    bool  pencil_mode = bool(info & 0x8000);
+    uint  info         = texture(board, info_coord).r;
+    bool  pencil_flag  = bool(info & 0x8000);
+    bool  error_flag   = bool(info & 0x4000);
+    bool  static_flag  = bool(info & 0x2000);
+    bool  entered_flag = !(static_flag || error_flag);
+
+    vec3 static_color  = vec3(0.1, 0.1, 0.1);
+    vec3 entered_color = vec3(0.1, 0.3, 0.5);
+    vec3 error_color   = vec3(0.6, 0.1, 0.1);
+
+    vec3 status_color = vec3(0.0);
+    status_color     += float(static_flag)  * static_color;
+    status_color     += float(entered_flag) * entered_color;
+    status_color     += float(error_flag)   * error_color;
 
 
 
@@ -39,51 +53,46 @@ void main() {
     float eps = 0.005;
 
     float shade_mask;
-    float shade_m1  = smoothstep(3.0-eps, 3.0, id.x) * smoothstep(id.x-eps, id.x, 5.0);
-    float shade_m2  = smoothstep(3.0-eps, 3.0, id.y) * smoothstep(id.y-eps, id.y, 5.0);
+    float shade_m1  = smoothstep(3.0-eps, 3.0, grid_id.x) * smoothstep(grid_id.x-eps, grid_id.x, 5.0);
+    float shade_m2  = smoothstep(3.0-eps, 3.0, grid_id.y) * smoothstep(grid_id.y-eps, grid_id.y, 5.0);
     shade_mask      = shade_m1 + shade_m2;
     shade_mask      = clamp(shade_mask, 0.0, 1.0);
     shade_mask     -= shade_m1 * shade_m2;
     
     frag_color.rgb *= 1 - shade_mask;
-    frag_color.rgb += shade_mask * vec3(0.8);
+    frag_color.rgb += shade_mask * vec3(0.85);
 
 
 
     // digits
-    if (pencil_mode) {
-        frag_color.rgb = vec3(0.8);
+    {
+        uint nn = 0;
+        vec2 ref_coord = cell_coord;
 
-        vec2 outer = vec2(8,0);
-        vec2 inner = vec2(2,2);
+        if (pencil_flag) {
 
-        float outer_mask = 1.0;
-        outer_mask *= step(outer.x, id.x) * step(id.x, outer.x);
-        outer_mask *= step(outer.y, id.y) * step(id.y, outer.y);
+            // check if our cell has a number
+            uint cell_n = uint(cell_id.y)*3 + uint(cell_id.x);
+            nn = ((info & (1<<cell_n))>>cell_n) * (cell_n+1);
+            
+            // min-max norm
+            ref_coord = (f_uv*27.0) - (grid_id*3.0 + cell_id);
 
-        float cell_mask = 1.0;
-        cell_mask *= step(inner.x, cell_id.x) * step(cell_id.x, inner.x);
-        cell_mask *= step(inner.y, cell_id.y) * step(cell_id.y, inner.y);
-
-        float mask = outer_mask * cell_mask;
-
-        //if ( bool(info & (1<<9)) ) { }
-        //if ( bool(info & (1<<8)) ) { }
-        //if ( bool(info & (1<<7)) ) { }
-    }
-    else {
-        vec3 status_color = vec3(0.1, 0.5, 0.7);
-        for (int i = 1; i < 10; i++) {
-            if (info == i) {
-                float m1 = fetch_number(float(i), cell_coord + vec2(-0.02, -0.015)); 
-                float m2 = fetch_number(float(i), cell_coord); 
-                float mask = clamp(m1*0.4 + m2, 0.0, 1.0);
-
-                frag_color.rgb *= 1 - mask;
-                frag_color.rgb += mask * status_color;
-                break;
+        }
+        else {
+            for (uint i = 0; i < 9; i++) {
+               nn += ((info & (1<<i))>>i) * (i+1);
             }
         }
+
+        float n = float(nn);
+
+        float m1 = fetch_number(n, ref_coord + vec2(-0.02, -0.015)); 
+        float m2 = fetch_number(n, ref_coord); 
+        float mask = clamp(m1*0.4 + m2, 0.0, 1.0);
+
+        frag_color.rgb *= 1.0 - mask;
+        frag_color.rgb += mask * status_color;
     }
 
 
@@ -96,7 +105,7 @@ void main() {
     vec2 uv;
     float s, w;
     float mask;
-    for (int i = int(!pencil_mode); i < 3; i++) {
+    for (int i = int(!pencil_flag); i < 3; i++) {
         int j = 2 - i;
 
         uv = mod(f_uv, r[j]) / r[j];

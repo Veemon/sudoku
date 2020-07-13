@@ -458,36 +458,47 @@ void main() {
 
     /*
 
-       bottom --  10 bit  - numbers pencilled / active number
+       bottom --  9  bit  - numbers active numbers
        top    --  1  bit  - pencil mode active
-       
-       0b1000001111111111
-         ^     ^
-      pencil   9
-
     */
-    #define PENCIL_DIM        16
-    #define PENCIL_SIZE       PENCIL_DIM * PENCIL_DIM
-    #define IDX(x,y)          (y*PENCIL_DIM) + x
+    #define BOARD_1            0x1
+    #define BOARD_2            0x2
+    #define BOARD_3            0x4
+    #define BOARD_4            0x8
+    #define BOARD_5            0x10
+    #define BOARD_6            0x20
+    #define BOARD_7            0x40
+    #define BOARD_8            0x80
+    #define BOARD_9            0x100
+    #define BOARD_ALL          0xFFF
 
-    u16 pencil_data[PENCIL_SIZE] = {};
-    for (u16 i = 0; i < PENCIL_SIZE; i++) { 
-        pencil_data[i] = 0; 
+    #define BOARD_FLAG_PENCIL  0x8000
+    #define BOARD_FLAG_ERROR   0x4000
+    #define BOARD_FLAG_STATIC  0x2000
+
+    #define BOARD_DIM        16
+    #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
+    #define IDX(x,y)        (y*BOARD_DIM) + x
+
+    u16 board_data[BOARD_SIZE] = {};
+    for (u16 i = 0; i < BOARD_SIZE; i++) { 
+        board_data[i] = 0; 
     }
 
     /// FIXME:  pencil digits
-    pencil_data[IDX(8,0)] = 0b1000001000000000;
-    pencil_data[IDX(8,1)] = 0b1000001100000000;
-    pencil_data[IDX(8,2)] = 0b1000001010000000;
+    board_data[IDX(8,0)] = BOARD_FLAG_PENCIL | BOARD_1;
+    board_data[IDX(8,1)] = BOARD_FLAG_PENCIL | BOARD_1 | BOARD_5 | BOARD_9;
+    board_data[IDX(8,2)] = BOARD_FLAG_PENCIL | BOARD_ALL;
 
     /// FIXME:  full digits
-    pencil_data[IDX(0,0)] = 1;
-    pencil_data[IDX(0,8)] = 5;
-    pencil_data[IDX(8,8)] = 9;
+    board_data[IDX(0,0)] = BOARD_FLAG_STATIC | BOARD_1;
+    board_data[IDX(1,4)] = BOARD_FLAG_STATIC | BOARD_1;
+    board_data[IDX(0,8)] = BOARD_FLAG_ERROR  | BOARD_2;
+    board_data[IDX(8,8)] = BOARD_3;
 
-    GLuint tex_pencil;
-    glGenTextures(1, &tex_pencil);
-    glBindTexture(GL_TEXTURE_2D, tex_pencil);
+    GLuint tex_board;
+    glGenTextures(1, &tex_board);
+    glBindTexture(GL_TEXTURE_2D, tex_board);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -496,7 +507,7 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, PENCIL_DIM, PENCIL_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, &pencil_data[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, BOARD_DIM, BOARD_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, &board_data[0]);
 
 
 
@@ -515,8 +526,8 @@ void main() {
     GLuint u_proj  = glGetUniformLocation(shader_program, "proj");
     GLuint u_model = glGetUniformLocation(shader_program, "model");
 
-    GLuint u_font   = glGetUniformLocation(shader_program, "font");
-    GLuint u_pencil = glGetUniformLocation(shader_program, "pencil");
+    GLuint u_font  = glGetUniformLocation(shader_program, "font");
+    GLuint u_board = glGetUniformLocation(shader_program, "board");
 
 
 
@@ -575,8 +586,8 @@ void main() {
                 u_proj  = glGetUniformLocation(shader_program, "proj");
                 u_model = glGetUniformLocation(shader_program, "model");
 
-                u_font   = glGetUniformLocation(shader_program, "font");
-                u_pencil = glGetUniformLocation(shader_program, "pencil");
+                u_font  = glGetUniformLocation(shader_program, "font");
+                u_board = glGetUniformLocation(shader_program, "board");
 
                 glDeleteProgram(old_shader_program);
                 glUseProgram(shader_program);
@@ -600,13 +611,13 @@ void main() {
         glUniformMatrix4fv(u_model, 1, GL_FALSE, &scale.a[0]);
 
         glUniform1i(u_font, 0);
-        glUniform1i(u_pencil, 1);
+        glUniform1i(u_board, 1);
 
         glActiveTexture(GL_TEXTURE0 + 0);
         glBindTexture(GL_TEXTURE_2D, tex_font);
 
         glActiveTexture(GL_TEXTURE0 + 1);
-        glBindTexture(GL_TEXTURE_2D, tex_pencil);
+        glBindTexture(GL_TEXTURE_2D, tex_board);
 
         // render
         if (render_timer >= render_wait) {
