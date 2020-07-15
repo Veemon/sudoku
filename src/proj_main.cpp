@@ -497,11 +497,7 @@ void main() {
     glGenerateMipmap(GL_TEXTURE_2D);
 
 
-    /*
 
-       bottom --  9  bit  - numbers active numbers
-       top    --  1  bit  - pencil mode active
-    */
     #define BOARD_EMPTY        0
     #define BOARD_1            0x1
     #define BOARD_2            0x2
@@ -540,6 +536,16 @@ void main() {
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, BOARD_DIM, BOARD_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, board_data);
+
+
+
+    // quick checks
+    u16 rows[9], cols[9], squares[9];
+    for (u8 i = 0; i < 9; i++) {
+        rows[i]    = BOARD_EMPTY;
+        cols[i]    = BOARD_EMPTY;
+        squares[i] = BOARD_EMPTY;
+    }
 
 
 
@@ -595,9 +601,6 @@ void main() {
 
     print_conrols();
 
-    u8 quick_clear = 0;
-    u8 clear_set   = 0;
-
     while (!glfwWindowShouldClose(window))
     {
         // input handling
@@ -615,13 +618,23 @@ void main() {
 
                     // clear digits
                     board_data[IDX(cursor_x, cursor_y)] = BOARD_EMPTY | BOARD_FLAG_CURSOR;
-                    if (!quick_clear) { quick_clear = 1; clear_set = 1;}
-                    else {
-                        for (u32 i = 0; i < BOARD_SIZE; i++) {
-                            board_data[i] = BOARD_EMPTY;
-                        }
-                    }
                     handled = 1;
+                }
+
+
+
+                // board clear
+
+                if (KEY_UP(GLFW_KEY_BACKSPACE)) {
+                    for (u32 i = 0; i < BOARD_SIZE; i++) {
+                        board_data[i] = BOARD_EMPTY;
+                    }
+                    for (u8 i = 0; i < 9; i++) {
+                        rows[i]    = BOARD_EMPTY;
+                        cols[i]    = BOARD_EMPTY;
+                        squares[i] = BOARD_EMPTY;
+                    }
+                    board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
                 }
 
 
@@ -640,9 +653,29 @@ void main() {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
                         u32 idx = IDX(cursor_x, cursor_y);
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
+                            // remove old value
+                            if (!(board_data[idx] & BOARD_FLAG_PENCIL) && (board_data[idx] & BOARD_FLAG_ERROR)) {
+                                cols[cursor_x] ^= board_data[idx];                                         
+                                rows[cursor_y] ^= board_data[idx];
+                                squares[(cursor_y/3)*3 + (cursor_x/3)] ^= board_data[idx];
+                            }
+
+                            board_data[idx] &= ~BOARD_FLAG_ERROR; // clear error flag
                             if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;} // clear pencil flag
                             if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
                             board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
+                            
+                            // error checking
+                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) {
+                                if ((cols[cursor_x] | rows[cursor_y] | squares[(cursor_y/3)*3 + (cursor_x/3)]) & board_data[idx]) {
+                                    board_data[idx] |= BOARD_FLAG_ERROR;
+                                } else { 
+                                    // set quick check flags
+                                    cols[cursor_x] ^= board_data[idx];                                         
+                                    rows[cursor_y] ^= board_data[idx];
+                                    squares[(cursor_y/3)*3 + (cursor_x/3)] ^= board_data[idx];
+                                }
+                            }
                         }
                         handled = 1;
                     }
@@ -656,7 +689,10 @@ void main() {
 
                 // keyboard pencil mode
                 if (!handled && KEY_DOWN(GLFW_KEY_SPACE)) {
-                    board_data[IDX(cursor_x, cursor_y)] ^= BOARD_FLAG_PENCIL;
+                    u32 idx = IDX(cursor_x, cursor_y);
+                    if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
+                        board_data[idx] ^= BOARD_FLAG_PENCIL;
+                    }
                     handled = 1;
                 }
 
@@ -697,6 +733,7 @@ void main() {
 
                     u16* new_board = (u16*) malloc(BOARD_SIZE * 2);
                     u8 bx = 0, by = 0;
+                    u16 r[9], c[9], s[9];
                         
                     while (*c_ptr) {
                         if (*c_ptr < '0' || *c_ptr > '9') {
@@ -710,11 +747,16 @@ void main() {
                             break;
                         }
 
+                        u32 idx = IDX(bx,by);
                         if (*c_ptr == '0') {
-                            new_board[IDX(bx,by)] = BOARD_EMPTY;
+                            new_board[idx] = BOARD_EMPTY;
                         } else {
-                            new_board[IDX(bx,by)] = BOARD_FLAG_STATIC | (1 << (*c_ptr-'1'));
+                            new_board[idx] = BOARD_FLAG_STATIC | (1 << (*c_ptr-'1'));
                         }
+
+                        c[cursor_x] ^= board_data[idx];
+                        r[cursor_y] ^= board_data[idx];
+                        s[(cursor_y/3)*3 + (cursor_x/3)] ^= board_data[idx];
 
                         c_ptr++;
                         bx++;
@@ -725,15 +767,18 @@ void main() {
                     if (by > 7) {
                         free(board_data);
                         board_data = new_board;
+                        board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+                        for (u8 i = 0; i < 9; i++) {
+                            rows[i]    = r[i];
+                            cols[i]    = c[i];
+                            squares[i] = s[i];
+                        }
                     } else {
                         free(new_board);
                         printf("[Error] Not enough board data.");
                     }
                 }
             }
-
-            if (handled && !clear_set) { quick_clear = 0; }
-            if (clear_set) { clear_set = 0; }
         }
         input_index = 0;
 
