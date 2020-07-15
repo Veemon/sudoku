@@ -589,9 +589,6 @@ void main() {
     f32 render_wait     = 1.0 / 60.0f;
     f32 render_timer    = render_wait;
 
-    f32 recompile_wait  = 1.0;
-    f32 recompile_timer = recompile_wait;
-
     u8 cursor_x = 4;
     u8 cursor_y = 4;
     board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
@@ -599,6 +596,7 @@ void main() {
     print_conrols();
 
     u8 quick_clear = 0;
+    u8 clear_set   = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -617,7 +615,7 @@ void main() {
 
                     // clear digits
                     board_data[IDX(cursor_x, cursor_y)] = BOARD_EMPTY | BOARD_FLAG_CURSOR;
-                    if (!quick_clear) { quick_clear = 1; }
+                    if (!quick_clear) { quick_clear = 1; clear_set = 1;}
                     else {
                         for (u32 i = 0; i < BOARD_SIZE; i++) {
                             board_data[i] = BOARD_EMPTY;
@@ -663,9 +661,8 @@ void main() {
                 }
 
                 // recompile shaders
-                if (!handled && KEY_UP(GLFW_KEY_F5) && recompile_timer > recompile_wait) {
+                if (!handled && KEY_UP(GLFW_KEY_F5)) {
                     handled = 1;
-                    recompile_timer = 0;
 
                     GLuint old_shader_program = shader_program;
                     shader_program = build_shader_program(PATH_SHADER_VERT, PATH_SHADER_FRAG, &info_log);
@@ -735,7 +732,8 @@ void main() {
                 }
             }
 
-            //if (handled) { quick_clear = 0; } // FIXME
+            if (handled && !clear_set) { quick_clear = 0; }
+            if (clear_set) { clear_set = 0; }
         }
         input_index = 0;
 
@@ -791,7 +789,6 @@ void main() {
         total_time += delta_s;
 
         render_timer    += delta_s;
-        recompile_timer += delta_s;
     }
 
     glfwDestroyWindow(window);
