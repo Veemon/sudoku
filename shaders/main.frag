@@ -40,7 +40,7 @@ void main() {
     float cursor       = float((info & 0x1000)>>12);
 
     vec3 static_color  = vec3(0.1, 0.1, 0.1);
-    vec3 entered_color = vec3(0.20, 0.50, 0.65);
+    vec3 entered_color = vec3(0.35, 0.25, 1.0);
     vec3 error_color   = vec3(0.6, 0.1, 0.1);
 
     vec3 status_color = vec3(0.0);
@@ -48,7 +48,7 @@ void main() {
     status_color     += float(entered_flag) * entered_color;
     status_color     += float(error_flag)   * error_color;
 
-    vec3 cursor_color = vec3(0.65) + status_color*0.7;
+    vec3 cursor_color = vec3(0.45) + status_color*0.7;
 
 
 
@@ -96,11 +96,11 @@ void main() {
 
         float n = float(nn);
 
-        float dist = 0.025;
+        float dist = 0.020;
 
-        float m1 = fetch_number(n, ref_coord + vec2(-dist, -dist)*cursor) * cursor; // TODO: use time to make this pop
+        float m1 = fetch_number(n, ref_coord + vec2(-dist, -dist)*cursor) * cursor;
         float m2 = fetch_number(n, ref_coord + vec2( dist,  dist)*cursor); 
-        float mask = clamp(m1*0.4 + m2, 0.0, 1.0);
+        float mask = clamp(m1*0.6 + m2, 0.0, 1.0);
 
         frag_color.rgb *= 1.0 - mask;
         frag_color.rgb += mask * status_color;

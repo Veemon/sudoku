@@ -325,7 +325,13 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 
 
 
-
+void print_conrols() {
+    printf("                           Sudoku\n\n");
+    printf(" Move Cursor     Pencil Mode     Pen Digit       Clear\n");
+    printf("    [WASD]         [Space]       [Shift+N]    [Escape(x2)] \n\n");
+    printf("       Move Cursor     Toggle Permanent    Solve \n");
+    printf("       [Arrow Keys]         [TAB]         [Enter]\n\n");
+}
 
 
 
@@ -369,9 +375,7 @@ void main() {
     if (!gladLoadGL()) {
         fprintf(stderr, "Failed to initialize OpenGL loader!\n");
         exit(-1);
-    } else {
-        printf("OpenGL %d.%d\n", GLVersion.major, GLVersion.minor);
-    }
+    } 
 
     // opengl settings
     glEnable(GL_BLEND);
@@ -519,7 +523,7 @@ void main() {
     #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
     #define IDX(x,y)        (y*BOARD_DIM) + x
 
-    u16 board_data[BOARD_SIZE] = {};
+    u16* board_data = (u16*) malloc(BOARD_SIZE * 2);
     for (u16 i = 0; i < BOARD_SIZE; i++) { 
         board_data[i] = BOARD_EMPTY; 
     }
@@ -535,7 +539,7 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, BOARD_DIM, BOARD_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, &board_data[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, BOARD_DIM, BOARD_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, board_data);
 
 
 
@@ -588,10 +592,13 @@ void main() {
     f32 recompile_wait  = 1.0;
     f32 recompile_timer = recompile_wait;
 
-    // FIXME
     u8 cursor_x = 4;
     u8 cursor_y = 4;
     board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+
+    print_conrols();
+
+    u8 quick_clear = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -604,10 +611,21 @@ void main() {
             InputEvent event = input_queue[event_idx];
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
-                // quit
                 if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
-                    return;
+                    // quit
+                    if (event.mod & GLFW_MOD_SHIFT) return;
+
+                    // clear digits
+                    board_data[IDX(cursor_x, cursor_y)] = BOARD_EMPTY | BOARD_FLAG_CURSOR;
+                    if (!quick_clear) { quick_clear = 1; }
+                    else {
+                        for (u32 i = 0; i < BOARD_SIZE; i++) {
+                            board_data[i] = BOARD_EMPTY;
+                        }
+                    }
+                    handled = 1;
                 }
+
 
                 // keyboard cursor
                 if (!handled && IS_KEY_DOWN) {
@@ -622,13 +640,20 @@ void main() {
                 // digit placement
                 if (!handled && IS_KEY_DOWN) {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
-                        // SHIFT - key places it out of pencil mode
                         u32 idx = IDX(cursor_x, cursor_y);
-                        if (event.mod & GLFW_MOD_SHIFT) { board_data[idx] &= ~BOARD_FLAG_PENCIL; } // clear pencil flag
-                        if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
-                        board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
+                        if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
+                            if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;} // clear pencil flag
+                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
+                            board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
+                        }
                         handled = 1;
                     }
+                }
+
+                // keyboard static mode
+                if (!handled && KEY_DOWN(GLFW_KEY_TAB)) {
+                    board_data[IDX(cursor_x, cursor_y)] ^= BOARD_FLAG_STATIC;
+                    handled = 1;
                 }
 
                 // keyboard pencil mode
@@ -662,7 +687,55 @@ void main() {
                         glUseProgram(shader_program);
                     }
                 }
+
+                // quick paste
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_V)) {
+                    handled = 1;
+
+                    // NOTE: supposedly glfw frees this? seems stupid.
+                    const char* clipboard = glfwGetClipboardString(window);
+                    char* c_ptr = (char*) clipboard;
+
+                    printf("[Data]\n%s\n\n", clipboard);
+
+                    u16* new_board = (u16*) malloc(BOARD_SIZE * 2);
+                    u8 bx = 0, by = 0;
+                        
+                    while (*c_ptr) {
+                        if (*c_ptr < '0' || *c_ptr > '9') {
+                            if (*c_ptr == ' ' || *c_ptr == '\t' || *c_ptr == '\r' || *c_ptr == '\n') {
+                                c_ptr++; 
+                                continue; 
+                            }
+
+                            printf("[Error] Found \"%c\" in paste data.\n", *c_ptr);
+                            free(new_board);
+                            break;
+                        }
+
+                        if (*c_ptr == '0') {
+                            new_board[IDX(bx,by)] = BOARD_EMPTY;
+                        } else {
+                            new_board[IDX(bx,by)] = BOARD_FLAG_STATIC | (1 << (*c_ptr-'1'));
+                        }
+
+                        c_ptr++;
+                        bx++;
+                        if (bx > 8) { bx = 0; by++; }
+                        if (by > 8) { break; }
+                    }
+
+                    if (by > 7) {
+                        free(board_data);
+                        board_data = new_board;
+                    } else {
+                        free(new_board);
+                        printf("[Error] Not enough board data.");
+                    }
+                }
             }
+
+            //if (handled) { quick_clear = 0; } // FIXME
         }
         input_index = 0;
 
@@ -694,7 +767,7 @@ void main() {
 
         glActiveTexture(GL_TEXTURE0 + 1);
         glBindTexture(GL_TEXTURE_2D, tex_board);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, BOARD_DIM, BOARD_DIM, GL_RED_INTEGER, GL_UNSIGNED_SHORT, &board_data[0]);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, BOARD_DIM, BOARD_DIM, GL_RED_INTEGER, GL_UNSIGNED_SHORT, board_data);
 
 
         // render
