@@ -25,8 +25,8 @@ void main() {
     // identification (welcome to arstotzka)
     vec2 grid_id = floor(vec2((f_uv - 1e-6) * 9));
 
-    const float dim_size = 1.0 / 16.0;         // rescale to account for texture size
-    const float offset   = dim_size * 0.5;
+    const float dim_size = 1.0 / 16.0;          // rescale to account for texture size
+    const float offset   = (1.0 / 32.0) - 1e-6; // half of dim size
 
     vec2 info_coord = grid_id*dim_size + offset;
     vec2 cell_coord = 9.0*f_uv - grid_id;
@@ -41,14 +41,15 @@ void main() {
 
     vec3 static_color  = vec3(0.1, 0.1, 0.1);
     vec3 entered_color = vec3(0.35, 0.25, 1.0);
-    vec3 error_color   = vec3(0.6, 0.1, 0.1);
+    vec3 error_color   = vec3(0.7, 0.15, 0.15);
 
     vec3 status_color = vec3(0.0);
     status_color     += float(static_flag)  * static_color;
     status_color     += float(entered_flag) * entered_color;
     status_color     += float(error_flag)   * error_color;
+    status_color      = clamp(status_color, 0.0, (1.0-float(static_flag)) + 0.35*float(static_flag));
 
-    vec3 cursor_color = vec3(0.45) + status_color*0.7;
+    vec3 cursor_color = vec3(0.785) + status_color*0.45;
 
 
 
@@ -68,8 +69,20 @@ void main() {
 
 
     // cursor
-    frag_color.rgb *= 1 - cursor;
-    frag_color.rgb += cursor * cursor_color;
+    {
+        float eps   = 0.8; // outer circle
+        float r     = 0.35;  // inner circle
+        
+        float lr = (r/2);
+        float hr = 1.0 - (r/2);
+
+        float shade = 1.0;
+        shade *= smoothstep(lr-eps, lr, cell_coord.x) * smoothstep(cell_coord.x-eps, cell_coord.x, hr);
+        shade *= smoothstep(lr-eps, lr, cell_coord.y) * smoothstep(cell_coord.y-eps, cell_coord.y, hr);
+
+        frag_color.rgb *= 1 - cursor;
+        frag_color.rgb += cursor * cursor_color * shade;
+    }
 
 
 
@@ -94,13 +107,12 @@ void main() {
             }
         }
 
-        float n = float(nn);
-
+        float n    = float(nn);
         float dist = 0.020;
 
         float m1 = fetch_number(n, ref_coord + vec2(-dist, -dist)*cursor) * cursor;
         float m2 = fetch_number(n, ref_coord + vec2( dist,  dist)*cursor); 
-        float mask = clamp(m1*0.6 + m2, 0.0, 1.0);
+        float mask = clamp(m1*0.25 + m2, 0.0, 1.0);
 
         frag_color.rgb *= 1.0 - mask;
         frag_color.rgb += mask * status_color;

@@ -324,6 +324,213 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 
 
 
+#define BOARD_EMPTY        0
+#define BOARD_1            0x1
+#define BOARD_2            0x2
+#define BOARD_3            0x4
+#define BOARD_4            0x8
+#define BOARD_5            0x10
+#define BOARD_6            0x20
+#define BOARD_7            0x40
+#define BOARD_8            0x80
+#define BOARD_9            0x100
+#define BOARD_ALL          0xFFF
+
+#define BOARD_FLAG_PENCIL  0x8000
+#define BOARD_FLAG_ERROR   0x4000
+#define BOARD_FLAG_STATIC  0x2000
+#define BOARD_FLAG_CURSOR  0x1000
+
+#define BOARD_DIM        16
+#define BOARD_SIZE       BOARD_DIM * BOARD_DIM
+#define IDX(x,y)         ((y)*BOARD_DIM) + (x)
+
+void check_errors(u16* board_data) {
+    // NOTE: lots of naive checking but I'm not really interested in this part of the code
+    u8 error_caught = 0;
+
+    // clear
+    for (u8 j = 0; j < 9; j++) {
+        for (u8 i = 0; i < 9; i++) {
+            board_data[IDX(i,j)] &= ~BOARD_FLAG_ERROR;
+        }
+    }
+
+
+    #define check_cases() {\
+        u8 p1 = (board_data[idx1] & BOARD_FLAG_PENCIL); \
+        u8 s1 = (board_data[idx1] & BOARD_FLAG_STATIC); \
+    \
+        u8 p2 = (board_data[idx2] & BOARD_FLAG_PENCIL); \
+        u8 s2 = (board_data[idx2] & BOARD_FLAG_STATIC); \
+    \
+        u8 case1 =  p1 & ~s2; \
+        u8 case2 =  p2 & ~s1; \
+    \
+        if (!(case1 || case2))  { \
+            board_data[idx1] |= BOARD_FLAG_ERROR; \
+            board_data[idx2] |= BOARD_FLAG_ERROR; \
+        } \
+    }
+
+    // check squares
+    u16 square[9][9];
+    u8  indices[9];
+    for (u8 square_y = 0; square_y < 3; square_y++) {
+        for (u8 square_x = 0; square_x < 3; square_x++) {
+            // clear cache
+            for (u8 j = 0; j < 9; j++) {
+                indices[j] = 0;
+                for (u8 i = 0; i < 9; i++) {
+                    square[i][j] = 0;
+                }
+            }
+
+            // record values
+            for (u8 j = 0; j < 3; j++) {
+                for (u8 i = 0; i < 3; i++) {
+                    u16 idx = IDX(square_x*3 + i, square_y*3 + j);
+                    for (u8 n = 0; n < 9; n++) {
+                        if (board_data[idx] & (1<<n)) {
+                            square[n][indices[n]] = idx;
+                            indices[n]++;
+                        }
+                    }
+                }
+            }
+
+            // check errors
+            for (u8 n = 0; n < 9; n++) {
+                if (indices[n] < 2) continue;
+
+                // count members statics
+                u8 entered_set = 0;
+                u8 static_set  = 0;
+                for (u8 i = 0; i < 9; i++) {
+                    if (!board_data[square[n][i]]) continue;
+                    if (!(board_data[square[n][i]] & BOARD_FLAG_PENCIL)) entered_set++;
+                    if   (board_data[square[n][i]] & BOARD_FLAG_STATIC)  static_set++;
+                }
+                
+                // enter errors
+                for (u8 i = 0; i < 9; i++) {
+                    if (board_data[square[n][i]] & BOARD_FLAG_PENCIL) {
+                        if (static_set > (board_data[square[n][i]] & BOARD_FLAG_STATIC) != 0 ) {
+                            board_data[square[n][i]] |= BOARD_FLAG_ERROR;
+                        }
+                    } else {
+                        if (entered_set > 1) {
+                            board_data[square[n][i]] |= BOARD_FLAG_ERROR;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+
+    // for (u8 square_y = 0; square_y < 3; square_y++) {
+    //     for (u8 square_x = 0; square_x < 3; square_x++) {
+
+    //         for (u8 n = 0; n < 9; n++) {
+
+    //             i32 duplicate = -1;
+    //             for (u8 j = 0; j < 3; j++) {
+    //                 for (u8 i = 0; i < 3; i++) {
+
+    //                     i32 idx = IDX(square_x*3 + i, square_y*3 + j);
+    //                     if (board_data[idx] & (1<<n)) {
+    //                         if (duplicate < 0) {
+    //                             duplicate = idx;
+    //                         } else {
+    //                             board_data[duplicate] |= BOARD_FLAG_ERROR;
+    //                             board_data[idx]       |= BOARD_FLAG_ERROR;
+    //                         }
+    //                     }
+    //                 }
+    //             }
+
+    //         }
+    //     }
+    // }
+
+    //// check square
+    //for (u8 square_y = 0; square_y < 3; square_y++) {
+    //    for (u8 square_x = 0; square_x < 3; square_x++) {
+
+    //        for (u8 grid_y = 0; grid_y < 3; grid_y++) {
+    //            for (u8 grid_x = 0; grid_x < 3; grid_x++) {
+
+    //                for (u8 y = 0; y < 3; y++) {
+    //                    for (u8 x = 0; x < 3; x++) {
+
+    //                        u8 x1 = grid_x + square_x*3;
+    //                        u8 x2 = (x1/3)*3 + x;
+
+    //                        u8 y1 = grid_y + square_y*3;
+    //                        u8 y2 = (y1/3)*3 + y;
+    //                        
+    //                        u16 idx1 = IDX(x1,y1);
+    //                        u16 idx2 = IDX(x2,y2);
+
+    //                        if (idx1 == idx2) continue;
+    //                        if (board_data[idx1] & board_data[idx2] & 0x1ff) {
+    //                            // FIXME
+    //    u8 p1 = (board_data[idx1] & BOARD_FLAG_PENCIL); 
+    //    u8 s1 = (board_data[idx1] & BOARD_FLAG_STATIC); 
+    //
+    //    u8 p2 = (board_data[idx2] & BOARD_FLAG_PENCIL); 
+    //    u8 s2 = (board_data[idx2] & BOARD_FLAG_STATIC); 
+    //
+    //    u8 case1 =  p1 & ~s2; 
+    //    u8 case2 =  p2 & ~s1; 
+    //
+    //    if (!(case1 || case2))  { 
+    //        board_data[idx1] |= BOARD_FLAG_ERROR; 
+    //        board_data[idx2] |= BOARD_FLAG_ERROR; 
+    //    } 
+    //                        }
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
+    //}
+
+    // // check row
+    // for (u8 y = 0; y < 9; y++) {
+    //     for (u8 x1 = 0; x1 < 9; x1++) {
+    //         for (u8 x2 = 0; x2 < 9; x2++) {
+    //             if (x1 == x2) continue;
+    //             u16 idx1 = IDX(x1,y);
+    //             u16 idx2 = IDX(x2,y);
+    //             if (board_data[idx1] & board_data[idx2] & 0x1ff) {
+    //                 check_cases();
+    //             }
+    //         }
+    //     }
+    // }
+
+    // // check row
+    // for (u8 x = 0; x < 9; x++) {
+    //     for (u8 y1 = 0; y1 < 9; y1++) {
+    //         for (u8 y2 = 0; y2 < 9; y2++) {
+    //             if (y1 == y2) continue;
+    //             u16 idx1 = IDX(x,y1);
+    //             u16 idx2 = IDX(x,y2);
+    //             if (board_data[idx1] & board_data[idx2] & 0x1ff) {
+    //                 check_cases();
+    //             }
+    //         }
+    //     }
+    // }
+
+    #undef check_cases
+}
+
+
+
 
 void print_conrols() {
     printf("                           Sudoku\n\n");
@@ -498,27 +705,6 @@ void main() {
 
 
 
-    #define BOARD_EMPTY        0
-    #define BOARD_1            0x1
-    #define BOARD_2            0x2
-    #define BOARD_3            0x4
-    #define BOARD_4            0x8
-    #define BOARD_5            0x10
-    #define BOARD_6            0x20
-    #define BOARD_7            0x40
-    #define BOARD_8            0x80
-    #define BOARD_9            0x100
-    #define BOARD_ALL          0xFFF
-
-    #define BOARD_FLAG_PENCIL  0x8000
-    #define BOARD_FLAG_ERROR   0x4000
-    #define BOARD_FLAG_STATIC  0x2000
-    #define BOARD_FLAG_CURSOR  0x1000
-
-    #define BOARD_DIM        16
-    #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
-    #define IDX(x,y)        (y*BOARD_DIM) + x
-
     u16* board_data = (u16*) malloc(BOARD_SIZE * 2);
     for (u16 i = 0; i < BOARD_SIZE; i++) { 
         board_data[i] = BOARD_EMPTY; 
@@ -536,17 +722,6 @@ void main() {
 
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, BOARD_DIM, BOARD_DIM, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, board_data);
-
-
-
-    // quick checks
-    u16 rows[9], cols[9], squares[9];
-    for (u8 i = 0; i < 9; i++) {
-        rows[i]    = BOARD_EMPTY;
-        cols[i]    = BOARD_EMPTY;
-        squares[i] = BOARD_EMPTY;
-    }
-
 
 
 
@@ -595,8 +770,8 @@ void main() {
     f32 render_wait     = 1.0 / 60.0f;
     f32 render_timer    = render_wait;
 
-    u8 cursor_x = 4;
-    u8 cursor_y = 4;
+    i8 cursor_x = 4;
+    i8 cursor_y = 4;
     board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
 
     print_conrols();
@@ -607,8 +782,10 @@ void main() {
         QueryPerformanceCounter(&start_time);
         glfwPollEvents();
 
+        u8 cursor_idx = IDX(cursor_x, cursor_y);
+        u8 handled = 0;
+        u8 board_input = 0;
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
-            u8 handled = 0;
             InputEvent event = input_queue[event_idx];
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
@@ -617,83 +794,74 @@ void main() {
                     if (event.mod & GLFW_MOD_SHIFT) return;
 
                     // clear digits
-                    board_data[IDX(cursor_x, cursor_y)] = BOARD_EMPTY | BOARD_FLAG_CURSOR;
+                    board_data[cursor_idx] = BOARD_EMPTY | BOARD_FLAG_CURSOR;
+                    board_input = 1;
                     handled = 1;
                 }
 
 
 
                 // board clear
-
                 if (KEY_UP(GLFW_KEY_BACKSPACE)) {
                     for (u32 i = 0; i < BOARD_SIZE; i++) {
                         board_data[i] = BOARD_EMPTY;
                     }
-                    for (u8 i = 0; i < 9; i++) {
-                        rows[i]    = BOARD_EMPTY;
-                        cols[i]    = BOARD_EMPTY;
-                        squares[i] = BOARD_EMPTY;
-                    }
-                    board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+                    board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
                 }
 
 
                 // keyboard cursor
                 if (!handled && IS_KEY_DOWN) {
-                    board_data[IDX(cursor_x, cursor_y)] &= ~BOARD_FLAG_CURSOR;
-                    if      (event.key == GLFW_KEY_LEFT  || event.key == GLFW_KEY_A) { cursor_x = (!cursor_x)     ? 8 : cursor_x-1; handled = 1; }
-                    else if (event.key == GLFW_KEY_RIGHT || event.key == GLFW_KEY_D) { cursor_x = (cursor_x == 8) ? 0 : cursor_x+1; handled = 1; }
-                    else if (event.key == GLFW_KEY_UP    || event.key == GLFW_KEY_W) { cursor_y = (!cursor_y)     ? 8 : cursor_y-1; handled = 1; }
-                    else if (event.key == GLFW_KEY_DOWN  || event.key == GLFW_KEY_S) { cursor_y = (cursor_y == 8) ? 0 : cursor_y+1; handled = 1; }
-                    board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+                    board_data[cursor_idx] &= ~BOARD_FLAG_CURSOR;
+
+                    u8 dr = 1;
+                    if (event.mod & GLFW_MOD_SHIFT) { dr = 3; }
+                    if      (event.key == GLFW_KEY_LEFT  || event.key == GLFW_KEY_A) { cursor_x -= dr; handled = 1; }
+                    else if (event.key == GLFW_KEY_RIGHT || event.key == GLFW_KEY_D) { cursor_x += dr; handled = 1; }
+                    else if (event.key == GLFW_KEY_UP    || event.key == GLFW_KEY_W) { cursor_y -= dr; handled = 1; }
+                    else if (event.key == GLFW_KEY_DOWN  || event.key == GLFW_KEY_S) { cursor_y += dr; handled = 1; }
+
+                    while (cursor_x < 0) { cursor_x += 9; } if (cursor_x > 9) { cursor_x %= 9; }
+                    while (cursor_y < 0) { cursor_y += 9; } if (cursor_y > 9) { cursor_y %= 9; }
+
+                    cursor_idx = IDX(cursor_x, cursor_y);
+                    board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
                 }
 
                 // digit placement
                 if (!handled && IS_KEY_DOWN) {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
-                        u32 idx = IDX(cursor_x, cursor_y);
+                        u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
-                            // remove old value
-                            if (!(board_data[idx] & BOARD_FLAG_PENCIL) && (board_data[idx] & BOARD_FLAG_ERROR)) {
-                                cols[cursor_x] ^= board_data[idx];                                         
-                                rows[cursor_y] ^= board_data[idx];
-                                squares[(cursor_y/3)*3 + (cursor_x/3)] ^= board_data[idx];
-                            }
-
                             board_data[idx] &= ~BOARD_FLAG_ERROR; // clear error flag
                             if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;} // clear pencil flag
                             if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
                             board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
-                            
-                            // error checking
-                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) {
-                                if ((cols[cursor_x] | rows[cursor_y] | squares[(cursor_y/3)*3 + (cursor_x/3)]) & board_data[idx]) {
-                                    board_data[idx] |= BOARD_FLAG_ERROR;
-                                } else { 
-                                    // set quick check flags
-                                    cols[cursor_x] ^= board_data[idx];                                         
-                                    rows[cursor_y] ^= board_data[idx];
-                                    squares[(cursor_y/3)*3 + (cursor_x/3)] ^= board_data[idx];
-                                }
-                            }
                         }
                         handled = 1;
+                        board_input = 1;
                     }
                 }
 
                 // keyboard static mode
-                if (!handled && KEY_DOWN(GLFW_KEY_TAB)) {
-                    board_data[IDX(cursor_x, cursor_y)] ^= BOARD_FLAG_STATIC;
+                if (!handled && KEY_DOWN(GLFW_KEY_TAB) && (board_data[cursor_idx] & 0x1ff)) {
+                    board_data[cursor_idx] ^= BOARD_FLAG_STATIC;
                     handled = 1;
+                    board_input = 1;
                 }
 
                 // keyboard pencil mode
                 if (!handled && KEY_DOWN(GLFW_KEY_SPACE)) {
-                    u32 idx = IDX(cursor_x, cursor_y);
-                    if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
-                        board_data[idx] ^= BOARD_FLAG_PENCIL;
+                    if (!(board_data[cursor_idx] & BOARD_FLAG_STATIC)) {
+                        if (board_data[cursor_idx] & BOARD_FLAG_PENCIL) {
+                            board_data[cursor_idx] = BOARD_FLAG_CURSOR;
+                        }
+                        else {
+                            board_data[cursor_idx] |= BOARD_FLAG_PENCIL;
+                        }
                     }
                     handled = 1;
+                    board_input = 1;
                 }
 
                 // recompile shaders
@@ -733,7 +901,6 @@ void main() {
 
                     u16* new_board = (u16*) malloc(BOARD_SIZE * 2);
                     u8 bx = 0, by = 0;
-                    u16 r[9], c[9], s[9];
                         
                     while (*c_ptr) {
                         if (*c_ptr < '0' || *c_ptr > '9') {
@@ -743,7 +910,6 @@ void main() {
                             }
 
                             printf("[Error] Found \"%c\" in paste data.\n", *c_ptr);
-                            free(new_board);
                             break;
                         }
 
@@ -754,10 +920,6 @@ void main() {
                             new_board[idx] = BOARD_FLAG_STATIC | (1 << (*c_ptr-'1'));
                         }
 
-                        c[cursor_x] ^= board_data[idx];
-                        r[cursor_y] ^= board_data[idx];
-                        s[(cursor_y/3)*3 + (cursor_x/3)] ^= board_data[idx];
-
                         c_ptr++;
                         bx++;
                         if (bx > 8) { bx = 0; by++; }
@@ -767,12 +929,8 @@ void main() {
                     if (by > 7) {
                         free(board_data);
                         board_data = new_board;
-                        board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
-                        for (u8 i = 0; i < 9; i++) {
-                            rows[i]    = r[i];
-                            cols[i]    = c[i];
-                            squares[i] = s[i];
-                        }
+                        board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+                        board_input = 1;
                     } else {
                         free(new_board);
                         printf("[Error] Not enough board data.");
@@ -780,7 +938,11 @@ void main() {
                 }
             }
         }
+
         input_index = 0;
+        if (board_input) { 
+            check_errors(board_data); 
+        }
 
 
 
