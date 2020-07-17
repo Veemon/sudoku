@@ -345,6 +345,48 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
 #define IDX(x,y)         ((y)*BOARD_DIM) + (x)
 
+
+#define LIST_NULL    0x1
+#define LIST_ROOT    0x2
+#define LIST_SKIP    0x4
+#define LIST_OTHER   0x8
+
+struct ListItem {
+    u8 type = LIST_NULL;
+    i8 cursor_x;
+    i8 cursor_y;
+    u16* board_data;
+    ListItem* next;
+    ListItem* prev;
+};
+
+u16* list_init(ListItem* root) {
+    root->type = LIST_ROOT;
+    root->cursor_x = 4;
+    root->cursor_y = 4;
+    root->board_data = (u16*) malloc(BOARD_SIZE * 2);
+    for (u16 i = 0; i < BOARD_SIZE; i++) { 
+        root->board_data[i] = BOARD_EMPTY; 
+    }
+    return root->board_data;
+}
+
+ListItem* list_copy(ListItem* node) {
+    node->next = (ListItem*) malloc(sizeof(ListItem));
+    node->next->board_data = (u16*) malloc(BOARD_SIZE * 2);
+    for (u16 i = 0; i < BOARD_SIZE; i++) {
+        node->next->board_data[i] = node->board_data[i];
+    }
+    node->next->prev = node;
+    return node->next;
+}
+
+void list_free(ListItem* node) {
+    free(node->board_data);
+    free(node);
+}
+
+
 void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
     u16 cache[9][9];
     u8  indices[9];
@@ -608,11 +650,9 @@ void main() {
     glGenerateMipmap(GL_TEXTURE_2D);
 
 
-
-    u16* board_data = (u16*) malloc(BOARD_SIZE * 2);
-    for (u16 i = 0; i < BOARD_SIZE; i++) { 
-        board_data[i] = BOARD_EMPTY; 
-    }
+    ListItem  history_root;
+    ListItem* history_ptr = &history_root;
+    u16* board_data = list_init(&history_root);
 
     GLuint tex_board;
     glGenTextures(1, &tex_board);
@@ -686,13 +726,19 @@ void main() {
         QueryPerformanceCounter(&start_time);
         glfwPollEvents();
 
-        u8 cursor_idx = IDX(cursor_x, cursor_y);
-        u8 handled = 0;
-        u8 board_input = 0;
+        u8 cursor_idx       = IDX(cursor_x, cursor_y);
+        u8 handled          = 0;
+        u8 board_undo       = 0;
+        u8 board_input      = 0;
+
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
             InputEvent event = input_queue[event_idx];
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
+                history_ptr         = list_copy(history_ptr);
+                board_data          = history_ptr->board_data;
+                u8 board_input_type = LIST_OTHER;
+
                 if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
                     // quit
                     if (event.mod & GLFW_MOD_SHIFT) return;
@@ -711,6 +757,8 @@ void main() {
                         board_data[i] = BOARD_EMPTY;
                     }
                     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+                    board_input = 1;
+                    handled = 1;
                 }
 
 
@@ -730,6 +778,11 @@ void main() {
 
                     cursor_idx = IDX(cursor_x, cursor_y);
                     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+
+                    if (handled) {
+                        board_input = 1;
+                        board_input_type = LIST_SKIP;
+                    }
                 }
 
                 // digit placement
@@ -737,10 +790,10 @@ void main() {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
                         u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
-                            board_data[idx] &= ~BOARD_FLAG_ERROR; // clear error flag
                             if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;} // clear pencil flag
                             if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
                             board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
+                            // FIXME: can't toggle off - press 2 twice for example
                         }
                         handled = 1;
                         board_input = 1;
@@ -766,6 +819,88 @@ void main() {
                     }
                     handled = 1;
                     board_input = 1;
+                    board_input_type = LIST_SKIP;
+                }
+
+                // undo
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_Z)) {
+                    handled    = 1;
+                    board_undo = 1;
+
+                    u8 count = 0;
+                    while (count < 2 || (history_ptr->type & (LIST_NULL | LIST_SKIP))) {
+                        if (history_ptr->type == LIST_ROOT) break;
+                            
+                        ListItem* tmp = history_ptr;
+                        history_ptr = history_ptr->prev;
+                        list_free(tmp);
+                        
+                        count++;
+                    }
+                    
+                    cursor_x   = history_ptr->cursor_x;
+                    cursor_y   = history_ptr->cursor_y;
+                    board_data = history_ptr->board_data;
+                }
+
+                // hard undo
+                if (!handled && (event.mod & GLFW_MOD_ALT) && KEY_UP(GLFW_KEY_Z)) {
+                    handled    = 1;
+                    board_undo = 1;
+
+                    while (history_ptr->type != LIST_ROOT) {
+                        ListItem* tmp = history_ptr;
+                        history_ptr = history_ptr->prev;
+                        list_free(tmp);
+                    }
+                    
+                    cursor_x   = history_ptr->cursor_x;
+                    cursor_y   = history_ptr->cursor_y;
+                    board_data = history_ptr->board_data;
+                }
+
+                // quick paste
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_V)) {
+                    handled = 1;
+
+                    // NOTE: supposedly glfw frees this? seems stupid.
+                    const char* clipboard = glfwGetClipboardString(window);
+                    char* c_ptr = (char*) clipboard;
+
+                    printf("[Data]\n%s\n\n", clipboard);
+
+                    u8 bx = 0, by = 0;
+                        
+                    while (*c_ptr) {
+                        if (*c_ptr < '0' || *c_ptr > '9') {
+                            if (*c_ptr == ' ' || *c_ptr == '\t' || *c_ptr == '\r' || *c_ptr == '\n') {
+                                c_ptr++; 
+                                continue; 
+                            }
+
+                            printf("[Error] Found \"%c\" in paste data.\n", *c_ptr);
+                            break;
+                        }
+
+                        u32 idx = IDX(bx,by);
+                        if (*c_ptr == '0') {
+                            board_data[idx] = BOARD_EMPTY;
+                        } else {
+                            board_data[idx] = BOARD_FLAG_STATIC | (1 << (*c_ptr-'1'));
+                        }
+
+                        c_ptr++;
+                        bx++;
+                        if (bx > 8) { bx = 0; by++; }
+                        if (by > 8) { break; }
+                    }
+
+                    if (by > 7) {
+                        board_input = 1;
+                        board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+                    } else {
+                        printf("[Error] Not enough board data.");
+                    }
                 }
 
                 // recompile shaders
@@ -793,60 +928,24 @@ void main() {
                     }
                 }
 
-                // quick paste
-                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_V)) {
-                    handled = 1;
-
-                    // NOTE: supposedly glfw frees this? seems stupid.
-                    const char* clipboard = glfwGetClipboardString(window);
-                    char* c_ptr = (char*) clipboard;
-
-                    printf("[Data]\n%s\n\n", clipboard);
-
-                    u16* new_board = (u16*) malloc(BOARD_SIZE * 2);
-                    u8 bx = 0, by = 0;
-                        
-                    while (*c_ptr) {
-                        if (*c_ptr < '0' || *c_ptr > '9') {
-                            if (*c_ptr == ' ' || *c_ptr == '\t' || *c_ptr == '\r' || *c_ptr == '\n') {
-                                c_ptr++; 
-                                continue; 
-                            }
-
-                            printf("[Error] Found \"%c\" in paste data.\n", *c_ptr);
-                            break;
-                        }
-
-                        u32 idx = IDX(bx,by);
-                        if (*c_ptr == '0') {
-                            new_board[idx] = BOARD_EMPTY;
-                        } else {
-                            new_board[idx] = BOARD_FLAG_STATIC | (1 << (*c_ptr-'1'));
-                        }
-
-                        c_ptr++;
-                        bx++;
-                        if (bx > 8) { bx = 0; by++; }
-                        if (by > 8) { break; }
+                if (!board_input) {
+                    if (!board_undo) {
+                        ListItem* tmp = history_ptr;
+                        history_ptr = history_ptr->prev;
+                        board_data  = history_ptr->board_data;
+                        list_free(tmp);
                     }
-
-                    if (by > 7) {
-                        free(board_data);
-                        board_data = new_board;
-                        board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
-                        board_input = 1;
-                    } else {
-                        free(new_board);
-                        printf("[Error] Not enough board data.");
-                    }
+                } else {
+                    history_ptr->type = board_input_type;
+                    check_errors(board_data);
+                    history_ptr->cursor_x = cursor_x;
+                    history_ptr->cursor_y = cursor_y;
                 }
+
             }
         }
 
         input_index = 0;
-        if (board_input) { 
-            check_errors(board_data); 
-        }
 
 
 
