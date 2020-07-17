@@ -345,73 +345,91 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
 #define IDX(x,y)         ((y)*BOARD_DIM) + (x)
 
-void check() {
-}
+void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
+    u16 cache[9][9];
+    u8  indices[9];
 
-void check_errors(u16* board_data) {
-    // NOTE: lots of naive checking but I'm not really interested in this part of the code
-    u8 error_caught = 0;
-
-    // clear
+    // clear cache
     for (u8 j = 0; j < 9; j++) {
+        indices[j] = 0;
         for (u8 i = 0; i < 9; i++) {
-            board_data[IDX(i,j)] &= ~BOARD_FLAG_ERROR;
+            cache[i][j] = 0;
+        }
+    }
+    
+    // record values
+    //for (u8 j = 0; j < 3; j++) {
+    //    for (u8 i = 0; i < 3; i++) {
+    //        u16 idx = IDX(square_x*3 + i, square_y*3 + j);
+    //        u16 idx = IDX(offset_x + i, offset_y + j);
+    //        for (u8 n = 0; n < 9; n++) {
+    //            if (board_data[idx] & (1<<n)) {
+    //                cache[n][indices[n]] = idx;
+    //                indices[n]++;
+    //            }
+    //        }
+    //    }
+    //}
+
+    // @v2
+    for (u8 j = ly; j < hy; j++) {
+        for (u8 i = lx; i < hx; i++) {
+            u16 idx = IDX(i, j);
+            for (u8 n = 0; n < 9; n++) {
+                if (board_data[idx] & (1<<n)) {
+                    cache[n][indices[n]] = idx;
+                    indices[n]++;
+                }
+            }
         }
     }
 
-    // check squares
-    u16 cache[9][9];
-    u8  indices[9];
-    for (u8 square_y = 0; square_y < 3; square_y++) {
-        for (u8 square_x = 0; square_x < 3; square_x++) {
-            // clear cache
-            for (u8 j = 0; j < 9; j++) {
-                indices[j] = 0;
-                for (u8 i = 0; i < 9; i++) {
-                    cache[i][j] = 0;
-                }
-            }
+    // check errors
+    for (u8 n = 0; n < 9; n++) {
+        if (indices[n] < 2) continue;
 
-            // record values
-            for (u8 j = 0; j < 3; j++) {
-                for (u8 i = 0; i < 3; i++) {
-                    u16 idx = IDX(square_x*3 + i, square_y*3 + j);
-                    for (u8 n = 0; n < 9; n++) {
-                        if (board_data[idx] & (1<<n)) {
-                            cache[n][indices[n]] = idx;
-                            indices[n]++;
-                        }
-                    }
+        // count members statics
+        u8 entered_set = 0;
+        u8 static_set  = 0;
+        for (u8 i = 0; i < 9; i++) {
+            if (!board_data[cache[n][i]]) continue;
+            if (!(board_data[cache[n][i]] & BOARD_FLAG_PENCIL)) entered_set++;
+            if   (board_data[cache[n][i]] & BOARD_FLAG_STATIC)  static_set++;
+        }
+        
+        // enter errors
+        for (u8 i = 0; i < 9; i++) {
+            if (board_data[cache[n][i]] & BOARD_FLAG_PENCIL) {
+                if (static_set > (board_data[cache[n][i]] & BOARD_FLAG_STATIC) != 0 ) {
+                    board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
                 }
-            }
-
-            // check errors
-            for (u8 n = 0; n < 9; n++) {
-                if (indices[n] < 2) continue;
-
-                // count members statics
-                u8 entered_set = 0;
-                u8 static_set  = 0;
-                for (u8 i = 0; i < 9; i++) {
-                    if (!board_data[cache[n][i]]) continue;
-                    if (!(board_data[cache[n][i]] & BOARD_FLAG_PENCIL)) entered_set++;
-                    if   (board_data[cache[n][i]] & BOARD_FLAG_STATIC)  static_set++;
-                }
-                
-                // enter errors
-                for (u8 i = 0; i < 9; i++) {
-                    if (board_data[cache[n][i]] & BOARD_FLAG_PENCIL) {
-                        if (static_set > (board_data[cache[n][i]] & BOARD_FLAG_STATIC) != 0 ) {
-                            board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
-                        }
-                    } else {
-                        if (entered_set > 1) {
-                            board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
-                        }
-                    }
+            } else {
+                if (entered_set > 1) {
+                    board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
                 }
             }
         }
+    }
+}
+
+void check_errors(u16* board_data) {
+    // check squares
+    // FIXME - reintroduced pencil - entry bug
+    // FIXME - introduced delete not update bug
+    for (u8 square_y = 0; square_y < 3; square_y++) {
+        for (u8 square_x = 0; square_x < 3; square_x++) {
+            _check(board_data, square_x*3, (square_x+1)*3, square_y*3, (square_y+1)*3);
+        }
+    }
+
+    // check rows
+    for (u8 row = 0; row < 9; row++) {
+        _check(board_data, 0, 9, row, row+1);
+    }
+
+    // check cols
+    for (u8 col = 0; col < 9; col++) {
+        _check(board_data, col, col+1, 0, 9);
     }
 }
 
