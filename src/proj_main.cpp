@@ -790,10 +790,10 @@ void main() {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
                         u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
-                            if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;} // clear pencil flag
-                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) { board_data[idx] &= ~0x1FF; } // clear digits
-                            board_data[idx] ^= 1 << (event.key-GLFW_KEY_1);                            // toggle digit
-                            // FIXME: can't toggle off - press 2 twice for example
+                            u16 target = 1 << (event.key-GLFW_KEY_1);
+                            if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;}                            // clear pencil flag
+                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~0x1FF | (board_data[idx] & target)); // clear digits
+                            board_data[idx] ^= target;                                                                            // toggle digit
                         }
                         handled = 1;
                         board_input = 1;
