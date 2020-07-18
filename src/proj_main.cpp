@@ -21,6 +21,13 @@
 #include "stdlib.h"
 #include "string.h"
 
+#ifdef DEBUG_ENABLE
+    #define DEBUG 1
+#else
+    #define DEBUG 0
+#endif
+
+
 // math
 union vec3 {
     struct {
@@ -199,10 +206,12 @@ GLuint load_shader(const char* filename, GLuint shader_type, u8** info_log) {
         glGetShaderInfoLog(shader, status_length, &status_length, (GLchar*) *info_log);
         glDeleteShader(shader);
 
+#if DEBUG
         printf("\n[Compilation Fail] :: %s\n%s", filename, *info_log);
         printf("--------------------------------------------------------\n");
         debug_shader(source);
         printf("\n");
+#endif
 
         free(source);
         return NULL;
@@ -472,16 +481,6 @@ void check_errors(u16* board_data) {
 
 
 
-void print_conrols() {
-    printf("                           Sudoku\n\n");
-    printf(" Move Cursor     Pencil Mode     Pen Digit       Clear\n");
-    printf("    [WASD]         [Space]       [Shift+N]    [Escape(x2)] \n\n");
-    printf("       Move Cursor     Toggle Permanent    Solve \n");
-    printf("       [Arrow Keys]         [TAB]         [Enter]\n\n");
-}
-
-
-
 void main() {
     // Setup GLFW window
     glfwSetErrorCallback(glfw_error_callback);
@@ -712,8 +711,6 @@ void main() {
     i8 cursor_y = 4;
     board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
 
-    print_conrols();
-
     while (!glfwWindowShouldClose(window))
     {
         // input handling
@@ -817,7 +814,7 @@ void main() {
                 }
 
                 // undo
-                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_Z)) {
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_Z)) {
                     handled    = 1;
                     board_undo = 1;
 
@@ -838,7 +835,7 @@ void main() {
                 }
 
                 // hard undo
-                if (!handled && (event.mod & GLFW_MOD_ALT) && KEY_UP(GLFW_KEY_Z)) {
+                if (!handled && (event.mod & GLFW_MOD_ALT) && KEY_DOWN(GLFW_KEY_Z)) {
                     handled    = 1;
                     board_undo = 1;
 

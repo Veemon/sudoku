@@ -25,22 +25,25 @@ if "%1" == "-d"      goto DEBUGGING
 if "%1" == "--debug" goto DEBUGGING
 
 set ARGS=/O2
+set LINK_ARGS=/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 goto COMPILE
 
 :TESTING
     echo [Tests Enabled]
     echo.
     set ARGS=/Zi /DTESTING_ENABLE
+    set LINK_ARGS=/SUBSYSTEM:CONSOLE
     goto COMPILE
 :DEBUGGING
     echo [Debug Enabled]
     echo.
     set ARGS=/Zi /DDEBUG_ENABLE
+    set LINK_ARGS=/SUBSYSTEM:CONSOLE
     goto COMPILE
 
 :COMPILE
 set EXE_NAME=sudoku.exe
-cl %ARGS% /nologo /Fe%EXE_NAME% %INCLUDES% %SOURCE% /link %LIBRARIES% /SUBSYSTEM:CONSOLE
+cl %ARGS% /nologo /Fe%EXE_NAME% %INCLUDES% %SOURCE% /link %LIBRARIES% %LINK_ARGS%
 if ERRORLEVEL 1 (
 	popd
 	exit /b 1
