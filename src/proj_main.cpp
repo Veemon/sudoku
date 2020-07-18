@@ -400,20 +400,6 @@ void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
     }
     
     // record values
-    //for (u8 j = 0; j < 3; j++) {
-    //    for (u8 i = 0; i < 3; i++) {
-    //        u16 idx = IDX(square_x*3 + i, square_y*3 + j);
-    //        u16 idx = IDX(offset_x + i, offset_y + j);
-    //        for (u8 n = 0; n < 9; n++) {
-    //            if (board_data[idx] & (1<<n)) {
-    //                cache[n][indices[n]] = idx;
-    //                indices[n]++;
-    //            }
-    //        }
-    //    }
-    //}
-
-    // @v2
     for (u8 j = ly; j < hy; j++) {
         for (u8 i = lx; i < hx; i++) {
             u16 idx = IDX(i, j);
@@ -434,15 +420,17 @@ void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
         u8 entered_set = 0;
         u8 static_set  = 0;
         for (u8 i = 0; i < 9; i++) {
-            if (!board_data[cache[n][i]]) continue;
+            if (i >= indices[n]) break;
+            if (!(board_data[cache[n][i]] & 0x1ff)) continue;
             if (!(board_data[cache[n][i]] & BOARD_FLAG_PENCIL)) entered_set++;
             if   (board_data[cache[n][i]] & BOARD_FLAG_STATIC)  static_set++;
         }
         
         // enter errors
         for (u8 i = 0; i < 9; i++) {
+            if (i >= indices[n]) break;
             if (board_data[cache[n][i]] & BOARD_FLAG_PENCIL) {
-                if (static_set > (board_data[cache[n][i]] & BOARD_FLAG_STATIC) != 0 ) {
+                if (static_set > u8((board_data[cache[n][i]] & BOARD_FLAG_STATIC) != 0) ) {
                     board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
                 }
             } else {
@@ -455,6 +443,13 @@ void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
 }
 
 void check_errors(u16* board_data) {
+    // clear errors
+    for (u8 y = 0; y < 9; y++) {
+        for (u8 x = 0; x < 9; x++) {
+            board_data[IDX(x,y)] &= ~BOARD_FLAG_ERROR;
+        }
+    }
+
     // check squares
     // FIXME - reintroduced pencil - entry bug
     // FIXME - introduced delete not update bug
@@ -464,15 +459,15 @@ void check_errors(u16* board_data) {
         }
     }
 
-    // check rows
-    for (u8 row = 0; row < 9; row++) {
-        _check(board_data, 0, 9, row, row+1);
-    }
+    // // check rows
+    // for (u8 row = 0; row < 9; row++) {
+    //     _check(board_data, 0, 9, row, row+1);
+    // }
 
-    // check cols
-    for (u8 col = 0; col < 9; col++) {
-        _check(board_data, col, col+1, 0, 9);
-    }
+    // // check cols
+    // for (u8 col = 0; col < 9; col++) {
+    //     _check(board_data, col, col+1, 0, 9);
+    // }
 }
 
 
