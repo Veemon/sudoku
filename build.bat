@@ -39,13 +39,15 @@ goto COMPILE
     goto COMPILE
 
 :COMPILE
-cl %ARGS% /nologo /Fesudoku.exe %INCLUDES% %SOURCE% /link %LIBRARIES% /SUBSYSTEM:CONSOLE
+set EXE_NAME=sudoku.exe
+cl %ARGS% /nologo /Fe%EXE_NAME% %INCLUDES% %SOURCE% /link %LIBRARIES% /SUBSYSTEM:CONSOLE
 if ERRORLEVEL 1 (
 	popd
 	exit /b 1
 )
 
-move sudoku.exe ..
+rcedit-x64.exe %EXE_NAME% --set-icon ..\res\icon.ico
+move %EXE_NAME% ..
 
 popd
 exit /b 0

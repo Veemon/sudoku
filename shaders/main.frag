@@ -39,15 +39,18 @@ void main() {
     bool  entered_flag = !(static_flag || error_flag);
     float cursor       = float((info & 0x1000)>>12);
 
-    vec3 static_color  = vec3(0.1, 0.1, 0.1);
-    vec3 entered_color = vec3(0.35, 0.25, 1.0);
-    vec3 error_color   = vec3(0.7, 0.15, 0.15);
+    vec3 static_color       = vec3(0.1, 0.1, 0.1);
+    vec3 entered_color      = vec3(0.35, 0.25, 1.0);
+    vec3 error_color        = vec3(0.7, 0.15, 0.15);
+    vec3 static_error_color = vec3(1.0, 0.45, 0.05);
 
-    vec3 status_color = vec3(0.0);
-    status_color     += float(static_flag)  * static_color;
-    status_color     += float(entered_flag) * entered_color;
-    status_color     += float(error_flag)   * error_color;
-    status_color      = clamp(status_color, 0.0, (1.0-float(static_flag)) + 0.35*float(static_flag));
+    vec3 status_color  = vec3(0.0);
+    status_color      += float(static_flag)  * static_color;
+    status_color      += float(entered_flag) * entered_color;
+    status_color      += float(error_flag)   * error_color;
+    status_color      *= 1.0 - float(static_flag && error_flag);
+    status_color      += float(static_flag && error_flag) * static_error_color;
+    status_color       = clamp(status_color, 0.0, 1.0);
 
     vec3 cursor_color = vec3(0.785) + status_color*0.45;
 
