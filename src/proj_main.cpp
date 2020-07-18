@@ -451,23 +451,21 @@ void check_errors(u16* board_data) {
     }
 
     // check squares
-    // FIXME - reintroduced pencil - entry bug
-    // FIXME - introduced delete not update bug
     for (u8 square_y = 0; square_y < 3; square_y++) {
         for (u8 square_x = 0; square_x < 3; square_x++) {
             _check(board_data, square_x*3, (square_x+1)*3, square_y*3, (square_y+1)*3);
         }
     }
 
-    // // check rows
-    // for (u8 row = 0; row < 9; row++) {
-    //     _check(board_data, 0, 9, row, row+1);
-    // }
+    // check rows
+    for (u8 row = 0; row < 9; row++) {
+        _check(board_data, 0, 9, row, row+1);
+    }
 
-    // // check cols
-    // for (u8 col = 0; col < 9; col++) {
-    //     _check(board_data, col, col+1, 0, 9);
-    // }
+    // check cols
+    for (u8 col = 0; col < 9; col++) {
+        _check(board_data, col, col+1, 0, 9);
+    }
 }
 
 
@@ -768,8 +766,8 @@ void main() {
                     else if (event.key == GLFW_KEY_UP    || event.key == GLFW_KEY_W) { cursor_y -= dr; handled = 1; }
                     else if (event.key == GLFW_KEY_DOWN  || event.key == GLFW_KEY_S) { cursor_y += dr; handled = 1; }
 
-                    while (cursor_x < 0) { cursor_x += 9; } if (cursor_x > 9) { cursor_x %= 9; }
-                    while (cursor_y < 0) { cursor_y += 9; } if (cursor_y > 9) { cursor_y %= 9; }
+                    while (cursor_x < 0) { cursor_x += 9; } cursor_x %= 9;
+                    while (cursor_y < 0) { cursor_y += 9; } cursor_y %= 9;
 
                     cursor_idx = IDX(cursor_x, cursor_y);
                     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
