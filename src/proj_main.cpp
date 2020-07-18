@@ -435,7 +435,7 @@ void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
                     board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
                 }
             } else {
-                if (entered_set > 1) {
+                if ((entered_set + static_set) > 1) {
                     board_data[cache[n][i]] |= BOARD_FLAG_ERROR;
                 }
             }
