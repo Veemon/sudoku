@@ -84,7 +84,8 @@ void main() {
         shade *= smoothstep(lr-eps, lr, cell_coord.y) * smoothstep(cell_coord.y-eps, cell_coord.y, hr);
 
         frag_color.rgb *= 1 - cursor;
-        frag_color.rgb += cursor * cursor_color * shade;
+        frag_color.rgb += cursor * cursor_color * shade * 1.05; // hack
+        frag_color = clamp(frag_color, 0.0, 1.0);
     }
 
 
@@ -94,6 +95,7 @@ void main() {
         uint nn = 0;
         vec2 ref_coord = cell_coord;
 
+        // grab digit
         if (pencil_flag) {
 
             // check if our cell has a number
@@ -110,12 +112,37 @@ void main() {
             }
         }
 
-        float n    = float(nn);
-        float dist = 0.020;
+        float n = float(nn);
 
-        float m1 = fetch_number(n, ref_coord + vec2(-dist, -dist)*cursor) * cursor;
-        float m2 = fetch_number(n, ref_coord + vec2( dist,  dist)*cursor); 
-        float mask = clamp(m1*0.25 + m2, 0.0, 1.0);
+        #define SHADOW_DIST      0.02
+        #define SHADOW_INTENSITY 0.25
+        #define BLUR_N           8
+        #define BLUR_SIZE        0.1
+
+        float digit_color = fetch_number(n, ref_coord + vec2(SHADOW_DIST, SHADOW_DIST)*cursor);
+
+        // blurring of shadow
+        float shadow_color = 0.0;
+        {
+            const float blur_delta = BLUR_SIZE / BLUR_N;
+            const float blur_reset = blur_delta * -float(BLUR_N/2);
+            vec2 blur_offset = vec2(blur_reset);
+
+            for (int y = 0; y < BLUR_N; y++) {
+                vec2 blur_coord  = ref_coord + vec2(-SHADOW_DIST, -SHADOW_DIST)*cursor + blur_offset;
+                for (int x = 0; x < BLUR_N; x++) {
+                    shadow_color += fetch_number(n, blur_coord);
+                    blur_offset.x += blur_delta;
+                }
+                blur_offset.x  = blur_reset;
+                blur_offset.y += blur_delta;
+            }
+
+            shadow_color /= float(BLUR_N * BLUR_N);
+            shadow_color *= cursor;
+        }
+
+        float mask = clamp(shadow_color*SHADOW_INTENSITY + digit_color, 0.0, 1.0);
 
         frag_color.rgb *= 1.0 - mask;
         frag_color.rgb += mask * status_color;

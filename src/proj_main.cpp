@@ -478,6 +478,25 @@ void check_errors(u16* board_data) {
     }
 }
 
+// TODO solve the AI
+
+#define PROGRESS_NONE   0
+#define PROGRESS_CLEAR  1
+
+void make_progress(u8* report, u16* board_data) {
+    if (*report == PROGRESS_NONE) {
+
+        // TODO: this is test code, and we seg fault
+        for (u8 j = 0; j < 9; j++) {
+            for (u8 i = 0; i < 9; i++) {
+                board_data[IDX(i,j)] = BOARD_EMPTY;
+            }
+        }
+
+        *report = PROGRESS_CLEAR;
+    }
+}
+
 
 
 
@@ -491,20 +510,22 @@ void main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    i32 window_width  = 1000;
-    i32 window_height = 1080;
-
-    GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Sudoku 2077", NULL, NULL);
-    if (window == NULL) exit(-1);
-
     i32 monitor_x      = 0;
     i32 monitor_y      = 0;
     i32 monitor_width  = 0;
     i32 monitor_height = 0;
+    i32 monitor_rate   = 0;
 
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
     glfwGetMonitorWorkarea(monitor, &monitor_x, &monitor_y, &monitor_width, &monitor_height);	
+    monitor_rate = glfwGetVideoMode(monitor)->refreshRate;
     glfwSetGamma(monitor, 1.0);
+
+    i32 window_width  = f32(monitor_height) * 0.9;
+    i32 window_height = f32(monitor_height) * 0.9;
+
+    GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Sudoku 2077", NULL, NULL);
+    if (window == NULL) exit(-1);
 
     glfwSetWindowPos(window,
                      monitor_x + (monitor_width  - window_width ) / 2,
@@ -704,12 +725,15 @@ void main() {
 
     f32 delta_s = 0.0;
 
-    f32 render_wait     = 1.0 / 60.0f;
-    f32 render_timer    = render_wait;
+    f32 render_wait  = 1.0 / f32(monitor_rate);
+    f32 render_timer = render_wait;
 
     i8 cursor_x = 4;
     i8 cursor_y = 4;
     board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+
+    bool waiting_for_solution = false;
+    u8 progress_report = PROGRESS_NONE;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -722,6 +746,8 @@ void main() {
         u8 board_undo       = 0;
         u8 board_input      = 0;
 
+        u8 made_progress = 0;
+
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
             InputEvent event = input_queue[event_idx];
 
@@ -731,6 +757,8 @@ void main() {
                 u8 board_input_type = LIST_OTHER;
 
                 if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
+                    waiting_for_solution = false;
+
                     // quit
                     if (event.mod & GLFW_MOD_SHIFT) return;
 
@@ -740,7 +768,30 @@ void main() {
                     handled = 1;
                 }
 
-
+                // check - solve
+                if (waiting_for_solution || KEY_UP(GLFW_KEY_ENTER)) {
+                    // check if there's statics
+                    if (!waiting_for_solution) {
+                        for (u8 j = 0; j < 9; j++) {
+                            for (u8 i = 0; i < 9; i++) {
+                                if (board_data[IDX(i,j)] & BOARD_FLAG_STATIC) {
+                                    waiting_for_solution = true;
+                                    break;
+                                }
+                            }
+                            if (waiting_for_solution) break;
+                        }
+                    }
+                    
+                    // perform solution iteration
+                    if (waiting_for_solution) {
+                        if (!made_progress) {
+                            make_progress(&progress_report, board_data);
+                            made_progress = 1;
+                        }
+                        continue;
+                    }
+                }
 
                 // board clear
                 if (KEY_UP(GLFW_KEY_BACKSPACE)) {
@@ -782,8 +833,9 @@ void main() {
                         u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
                             u16 target = 1 << (event.key-GLFW_KEY_1);
-                            if (event.mod & GLFW_MOD_SHIFT)   {board_data[idx] &= ~BOARD_FLAG_PENCIL;}                            // clear pencil flag
+                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] &= ~BOARD_FLAG_PENCIL;}                              // clear pencil flag
                             if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~0x1FF | (board_data[idx] & target)); // clear digits
+                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] ^= target;}                                          // pre-empt placement
                             board_data[idx] ^= target;                                                                            // toggle digit
                         }
                         handled = 1;
