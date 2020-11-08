@@ -104,9 +104,9 @@ void project_orthographic(mat4* m, f32 left, f32 right, f32 bottom, f32 top, f32
     f32 dtb = top   - bottom;
     f32 dfn = far   - near;
 
-    m->x.x = 2 / drl;
-    m->y.y = 2 / dtb;
-    m->z.z = 2 / dfn;
+    m->x.x =  2 / drl;
+    m->y.y =  2 / dtb;
+    m->z.z = -2 / dfn;
 
     m->w.x = -(right + left  ) / drl;
     m->w.y = -(top   + bottom) / dtb;
@@ -322,8 +322,9 @@ static void key_callback(GLFWwindow* window, i32 key, i32 scancode, i32 action, 
 
 static void mouse_click_callback(GLFWwindow* window, i32 button, i32 action, i32 mods) {
     input_queue[input_index].type          = INPUT_TYPE_MOUSE_PRESS;
-    input_queue[input_index].mouse_button |= (button == GLFW_MOUSE_BUTTON_LEFT)  * 0x2;
-    input_queue[input_index].mouse_button |= (button == GLFW_MOUSE_BUTTON_RIGHT) * 0x1;
+    input_queue[input_index].mouse_button  = 0;
+    input_queue[input_index].mouse_button |= u8(button == GLFW_MOUSE_BUTTON_LEFT)  * 0x2;
+    input_queue[input_index].mouse_button |= u8(button == GLFW_MOUSE_BUTTON_RIGHT) * 0x1;
     input_queue[input_index].action        = action;
     input_queue[input_index].mod           = mods;
     input_index++;
@@ -350,6 +351,9 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_FLAG_ERROR   0x4000
 #define BOARD_FLAG_STATIC  0x2000
 #define BOARD_FLAG_CURSOR  0x1000
+#define BOARD_FLAG_HOVER   0x0800
+#define BOARD_FLAG_R2      0x0400
+#define BOARD_FLAG_R3      0x0200
 
 #define BOARD_DIM        16
 #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
@@ -708,12 +712,22 @@ void main() {
     f32 window_ratio = f32(window_width) / f32(window_height);
     project_orthographic(&proj, -window_ratio, window_ratio, -1.0f, 1.0f, 0.0f, 100.0f);
 
+    const f32 target_scale = 0.85f;
     mat4 scale;
     identity(&scale);
-    scale_mat4(&scale, {0.85f, 0.85f, 0.85f});
+    scale_mat4(&scale, {target_scale, target_scale, target_scale});
 
     glUseProgram(shader_program);
     glBindVertexArray(vao);
+
+
+    // mouse synch
+    i8 mouse_target_x;
+    i8 mouse_target_y;
+    u8 hover_idx = 0xFF;
+
+    f32 x_ratio = 1.0f, y_ratio = 1.0f;
+    f32 adx     = 0.0f, ady     = 0.0f;
 
 
 
@@ -737,7 +751,7 @@ void main() {
 
     while (!glfwWindowShouldClose(window))
     {
-        // input handling
+        // state reset
         QueryPerformanceCounter(&start_time);
         glfwPollEvents();
 
@@ -748,8 +762,95 @@ void main() {
 
         u8 made_progress = 0;
 
+
+
+        // window - resizing
+        i32 _width  = 0,    _height = 0;
+        glfwGetFramebufferSize(window, &_width, &_height);
+        if (_width != window_width || _height != window_height) {
+            glViewport(0, 0, _width, _height);
+
+            window_width  = _width;
+            window_height = _height;
+
+            x_ratio  = f32(window_width) / f32(window_height);
+            y_ratio  = f32(window_height) / f32(window_width);
+
+            if (window_width > window_height) {
+                adx = (x_ratio - 1) / 2.0f;
+                project_orthographic(&proj, -x_ratio, x_ratio, -1.0f, 1.0f, 0.0f, 100.0f);
+            }
+
+            if (window_height > window_width) {
+                ady = (y_ratio - 1) / 2.0f;
+                project_orthographic(&proj, -1.0f, 1.0f, -y_ratio, y_ratio, 0.0f, 100.0f);
+            }
+        }
+
+
+
+        // event handling
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
             InputEvent event = input_queue[event_idx];
+
+            // mouse coords [0,1] -> [-ratio_delta, 1 + ratio_delta]
+            f32 screen_x = event.mouse_position[0] / window_width;
+            f32 screen_y = event.mouse_position[1] / window_height;
+
+            screen_x = screen_x*(1.0f + adx + adx) - adx;
+            screen_y = screen_y*(1.0f + ady + ady) - ady;
+
+            // remap coords to account for board scale
+            {
+                f32 d = 0.5 * (1.0f - target_scale);
+                screen_x = screen_x*(1.0f+d+d) - d; 
+                screen_y = screen_y*(1.0f+d+d) - d; 
+            }
+
+            // clear current hover
+            if (hover_idx < 0xFF) { 
+                board_data[hover_idx] &= ~BOARD_FLAG_HOVER; 
+                hover_idx = 0xFF;
+            }
+
+            // get hover with deadband
+            if (screen_x < 1.0f && screen_y < 1.0f) {
+                const f32 gamma = 0.5f * (1.0f/9.0f);
+
+                f32 xn = screen_x * 9.0f;
+                i8  xi = i8(xn);
+                f32 dx  = xn - f32(xi);
+
+                f32 yn = screen_y * 9.0f;
+                i8  yi = i8(yn);
+                f32 dy  = yn - f32(yi);
+
+                if (gamma < dx && dx < 1.0f - gamma) {
+                    if (gamma < dy && dy < 1.0f - gamma) {
+                        mouse_target_x = xi;
+                        mouse_target_y = yi;
+                        hover_idx = IDX(mouse_target_x, mouse_target_y);
+                        board_data[hover_idx] |= BOARD_FLAG_HOVER;
+                    }
+                }
+
+            } 
+
+            if (event.type == INPUT_TYPE_MOUSE_PRESS) {
+                if (event.mouse_button & 0x2) {
+                    // move cursor to hover
+                    if (hover_idx < 0xFF) {
+                        board_data[cursor_idx] &= ~BOARD_FLAG_CURSOR;
+
+                        cursor_x = mouse_target_x;
+                        cursor_y = mouse_target_y;
+                        u8 cursor_idx = IDX(cursor_x, cursor_y);
+
+                        board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+                    }
+                }
+            }
+
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
                 history_ptr         = list_copy(history_ptr);
@@ -897,6 +998,7 @@ void main() {
                         list_free(tmp);
                     }
                     
+                    hover_idx  = 0xFF;
                     cursor_x   = history_ptr->cursor_x;
                     cursor_y   = history_ptr->cursor_y;
                     board_data = history_ptr->board_data;
@@ -989,20 +1091,6 @@ void main() {
         }
 
         input_index = 0;
-
-
-
-        // window - resizing
-        i32 _width = 0, _height = 0;
-        glfwGetFramebufferSize(window, &_width, &_height);
-        if (_width != window_width || _height != window_height) {
-            glViewport(0, 0, _width, _height);
-            window_width = _width;
-            window_height = _height;
-
-            window_ratio = f32(window_width) / f32(window_height);
-            project_orthographic(&proj, -window_ratio, window_ratio, -1.0f, 1.0f, 0.0f, 100.0f);
-        }
 
 
 

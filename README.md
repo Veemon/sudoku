@@ -1,5 +1,10 @@
 # Sudoku
 
+### TODO
+* load(?), rename digits and shuffle rows/cols to create new puzzles
+* have AI solve
+* [optional] little sounds play
+
 ### Controls 
 * `WASD` or `arrow keys` for movement
 * `Shift+direction` to move a block in the direction
