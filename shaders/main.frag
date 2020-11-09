@@ -59,7 +59,7 @@ void main() {
 
     float overlap = ceil((cursor-hover)*(cursor-hover));
     hover_color *= overlap;
-    hover_color += (1.0 - overlap) * (vec3(0.15) + status_color*0.35);
+    hover_color += (1.0 - overlap) * (vec3(0.37) + status_color*0.35);
 
 
 
@@ -169,7 +169,7 @@ void main() {
         float mask = clamp(shadow_color*SHADOW_INTENSITY + digit_color, 0.0, 1.0);
 
         frag_color.rgb *= 1.0 - mask;
-        frag_color.rgb += mask * (status_color + hover*vec3(0.58)); //bright on hover
+        frag_color.rgb += mask * (status_color + hover*(overlap*vec3(0.58) + (1.0-overlap)*vec3(0.86))); //bright on hover
         frag_color = clamp(frag_color, 0.0, 1.0);
     }
 

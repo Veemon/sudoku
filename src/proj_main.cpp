@@ -369,6 +369,7 @@ struct ListItem {
     u8 type = LIST_NULL;
     i8 cursor_x;
     i8 cursor_y;
+    u32 hover_idx;
     u16* board_data;
     ListItem* next;
     ListItem* prev;
@@ -500,6 +501,205 @@ void make_progress(u8* report, u16* board_data) {
         *report = PROGRESS_CLEAR;
     }
 }
+
+
+
+
+
+
+
+
+const u8 puzzles[16][81] = {
+    {
+        8,4,5,6,3,2,1,7,9,
+        7,3,2,9,1,8,6,5,4,
+        1,9,6,7,4,5,3,2,8,
+        6,8,3,5,7,4,9,1,2,
+        4,5,7,2,9,1,8,3,6,
+        2,1,9,8,6,3,5,4,7,
+        3,6,1,4,2,9,7,8,5,
+        5,7,4,1,8,6,2,9,3,
+        9,2,8,3,5,7,4,6,1
+    },
+    {
+        2,5,6,8,3,1,7,4,9,
+        8,3,7,6,4,9,5,1,2,
+        1,9,4,7,2,5,3,8,6,
+        6,4,1,5,8,7,9,2,3,
+        7,2,5,1,9,3,8,6,4,
+        3,8,9,4,6,2,1,7,5,
+        9,7,8,2,5,4,6,3,1,
+        5,6,2,3,1,8,4,9,7,
+        4,1,3,9,7,6,2,5,8
+    },
+    {
+        8,5,7,2,6,1,3,9,4,
+        3,1,2,4,9,5,7,8,6,
+        9,6,4,3,7,8,2,1,5,
+        1,9,5,7,3,4,6,2,8,
+        7,2,8,9,5,6,1,4,3,
+        6,4,3,1,8,2,5,7,9,
+        5,8,1,6,4,7,9,3,2,
+        4,7,9,5,2,3,8,6,1,
+        2,3,6,8,1,9,4,5,7
+    },
+    {
+        8,5,7,3,9,2,4,1,6,
+        2,1,4,8,5,6,3,7,9,
+        9,3,6,1,4,7,2,8,5,
+        5,6,8,4,2,9,1,3,7,
+        4,9,2,7,3,1,6,5,8,
+        1,7,3,6,8,5,9,4,2,
+        3,2,1,5,6,8,7,9,4,
+        6,4,5,9,7,3,8,2,1,
+        7,8,9,2,1,4,5,6,3
+    },
+    {
+        1,2,5,6,4,9,3,7,8,
+        8,3,4,7,1,5,2,9,6,
+        6,9,7,3,8,2,4,1,5,
+        7,4,6,9,5,3,1,8,2,
+        3,5,9,8,2,1,7,6,4,
+        2,8,1,4,7,6,9,5,3,
+        5,7,3,2,9,8,6,4,1,
+        4,6,8,1,3,7,5,2,9,
+        9,1,2,5,6,4,8,3,7
+    },
+    {
+        2,3,8,4,6,7,9,1,5,
+        4,1,5,2,9,3,6,7,8,
+        7,9,6,8,5,1,2,3,4,
+        9,7,3,5,4,8,1,6,2,
+        6,2,4,1,3,9,8,5,7,
+        8,5,1,7,2,6,4,9,3,
+        5,8,7,9,1,2,3,4,6,
+        1,6,2,3,7,4,5,8,9,
+        3,4,9,6,8,5,7,2,1
+    },
+    {
+        3,6,2,7,9,4,1,8,5,
+        5,1,8,6,2,3,7,9,4,
+        4,9,7,1,8,5,2,3,6,
+        8,5,9,4,6,2,3,7,1,
+        1,4,6,8,3,7,5,2,9,
+        2,7,3,5,1,9,4,6,8,
+        9,3,5,2,4,8,6,1,7,
+        7,8,1,3,5,6,9,4,2,
+        6,2,4,9,7,1,8,5,3
+    },
+    {
+        6,7,5,9,4,8,2,1,3,
+        3,2,8,1,6,5,9,7,4,
+        1,4,9,7,3,2,5,6,8,
+        2,9,1,3,5,7,4,8,6,
+        4,8,6,2,9,1,7,3,5,
+        5,3,7,6,8,4,1,2,9,
+        8,1,4,5,2,3,6,9,7,
+        9,5,2,8,7,6,3,4,1,
+        7,6,3,4,1,9,8,5,2
+    },
+    {
+        1,9,7,3,8,4,5,6,2,
+        8,5,2,6,7,1,9,3,4,
+        4,6,3,9,5,2,8,7,1,
+        5,8,9,7,1,3,2,4,6,
+        6,3,4,2,9,8,7,1,5,
+        2,7,1,4,6,5,3,9,8,
+        3,1,5,8,4,7,6,2,9,
+        7,4,6,5,2,9,1,8,3,
+        9,2,8,1,3,6,4,5,7
+    },
+    {
+        9,7,2,8,6,3,5,4,1,
+        6,1,8,7,4,5,9,2,3,
+        4,5,3,2,9,1,6,8,7,
+        5,4,9,1,2,8,7,3,6,
+        8,2,1,6,3,7,4,5,9,
+        7,3,6,4,5,9,2,1,8,
+        2,9,5,3,8,6,1,7,4,
+        1,8,4,9,7,2,3,6,5,
+        3,6,7,5,1,4,8,9,2
+    },
+    {
+        3,4,5,8,7,1,2,6,9,
+        2,7,9,6,5,3,1,8,4,
+        8,6,1,4,2,9,5,3,7,
+        1,9,7,3,4,6,8,5,2,
+        4,5,2,7,1,8,3,9,6,
+        6,8,3,5,9,2,7,4,1,
+        7,3,8,2,6,4,9,1,5,
+        5,1,6,9,3,7,4,2,8,
+        9,2,4,1,8,5,6,7,3
+    },
+    {
+        2,9,4,8,6,3,5,1,7,
+        7,1,5,4,2,9,6,3,8,
+        8,6,3,7,5,1,4,9,2,
+        1,5,2,9,4,7,8,6,3,
+        4,7,9,3,8,6,2,5,1,
+        6,3,8,5,1,2,9,7,4,
+        9,8,6,1,3,4,7,2,5,
+        5,2,1,6,7,8,3,4,9,
+        3,4,7,2,9,5,1,8,6
+    },
+    {
+        7,6,3,1,2,8,4,5,9,
+        9,2,4,5,6,7,8,3,1,
+        8,5,1,9,3,4,2,7,6,
+        4,1,8,2,9,5,3,6,7,
+        2,7,5,6,4,3,1,9,8,
+        6,3,9,7,8,1,5,4,2,
+        3,4,2,8,7,6,9,1,5,
+        1,8,6,3,5,9,7,2,4,
+        5,9,7,4,1,2,6,8,3
+    },
+    {
+        8,7,3,9,6,1,4,2,5,
+        6,2,4,7,5,3,9,1,8,
+        9,5,1,2,4,8,3,7,6,
+        5,1,8,6,9,4,2,3,7,
+        2,6,9,1,3,7,5,8,4,
+        4,3,7,5,8,2,6,9,1,
+        3,8,2,4,7,5,1,6,9,
+        7,9,5,3,1,6,8,4,2,
+        1,4,6,8,2,9,7,5,3
+    },
+    {
+        7,9,2,5,6,8,1,4,3,
+        4,5,3,2,1,9,8,6,7,
+        8,6,1,3,7,4,9,5,2,
+        6,2,5,8,9,3,7,1,4,
+        3,7,9,1,4,2,6,8,5,
+        1,4,8,7,5,6,2,3,9,
+        2,8,4,9,3,1,5,7,6,
+        9,3,7,6,8,5,4,2,1,
+        5,1,6,4,2,7,3,9,8
+    },
+    {
+        1,6,2,8,5,7,4,9,3,
+        5,3,4,1,2,9,6,7,8,
+        7,8,9,6,4,3,5,2,1,
+        4,7,5,3,1,2,9,8,6,
+        9,1,3,5,8,6,7,4,2,
+        6,2,8,7,9,4,1,3,5,
+        3,5,6,4,7,8,2,1,9,
+        2,4,1,9,3,5,8,6,7,
+        8,9,7,2,6,1,3,5,4
+    }
+};
+
+void generate_puzzle(u16* board) {
+    printf("new puzzle\n");
+    for (u8 i = 0; i < 9; i++){ 
+        for (u8 j = 0; j < 9; j++){ 
+            board[IDX(i,j)] = BOARD_FLAG_STATIC & (1 << i);
+        }
+    }
+}
+
+
+
+
 
 
 
@@ -744,7 +944,8 @@ void main() {
 
     i8 cursor_x = 4;
     i8 cursor_y = 4;
-    board_data[IDX(cursor_x, cursor_y)] |= BOARD_FLAG_CURSOR;
+    u32 cursor_idx = IDX(cursor_x, cursor_y);
+    board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
 
     bool waiting_for_solution = false;
     u8 progress_report = PROGRESS_NONE;
@@ -755,17 +956,9 @@ void main() {
         QueryPerformanceCounter(&start_time);
         glfwPollEvents();
 
-        u8 cursor_idx       = IDX(cursor_x, cursor_y);
-        u8 handled          = 0;
-        u8 board_undo       = 0;
-        u8 board_input      = 0;
-
-        u8 made_progress = 0;
-
-
 
         // window - resizing
-        i32 _width  = 0,    _height = 0;
+        i32 _width = 0, _height = 0;
         glfwGetFramebufferSize(window, &_width, &_height);
         if (_width != window_width || _height != window_height) {
             glViewport(0, 0, _width, _height);
@@ -773,8 +966,8 @@ void main() {
             window_width  = _width;
             window_height = _height;
 
-            x_ratio  = f32(window_width) / f32(window_height);
-            y_ratio  = f32(window_height) / f32(window_width);
+            x_ratio = f32(window_width) / f32(window_height);
+            y_ratio = f32(window_height) / f32(window_width);
 
             if (window_width > window_height) {
                 adx = (x_ratio - 1) / 2.0f;
@@ -788,10 +981,23 @@ void main() {
         }
 
 
-
         // event handling
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
+
+            // reset for new event
             InputEvent event = input_queue[event_idx];
+
+            history_ptr = list_copy(history_ptr);
+            board_data  = history_ptr->board_data;
+
+            u8 handled          = 0;            // set ths if the event was handled
+            u8 board_undo       = 0;            // set this for a board undo
+            u8 board_input      = 0;            // set this if there was a board change
+            u8 board_input_type = LIST_OTHER;   // set this to LIST_SKIP if skippable in undo chain
+
+            u8 made_progress = 0; // FIXME: how does this work again? maybe not in event loop?
+
+
 
             // mouse coords [0,1] -> [-ratio_delta, 1 + ratio_delta]
             f32 screen_x = event.mouse_position[0] / window_width;
@@ -801,21 +1007,20 @@ void main() {
             screen_y = screen_y*(1.0f + ady + ady) - ady;
 
             // remap coords to account for board scale
-            {
-                f32 d = 0.5 * (1.0f - target_scale);
-                screen_x = screen_x*(1.0f+d+d) - d; 
-                screen_y = screen_y*(1.0f+d+d) - d; 
-            }
+            f32 d = 0.5 * (1.0f - target_scale);
+            screen_x = screen_x*(1.0f+d+d) - d; 
+            screen_y = screen_y*(1.0f+d+d) - d; 
 
             // clear current hover
             if (hover_idx < 0xFF) { 
-                board_data[hover_idx] &= ~BOARD_FLAG_HOVER; 
+                // NOTE: instead of saving this to a new history node, override the previous node
+                history_ptr->prev->board_data[hover_idx] &= ~BOARD_FLAG_HOVER; 
                 hover_idx = 0xFF;
             }
 
             // get hover with deadband
             if (screen_x < 1.0f && screen_y < 1.0f) {
-                const f32 gamma = 0.5f * (1.0f/9.0f);
+                const f32 gamma = 0.8f * (1.0f/9.0f);
 
                 f32 xn = screen_x * 9.0f;
                 i8  xi = i8(xn);
@@ -825,38 +1030,41 @@ void main() {
                 i8  yi = i8(yn);
                 f32 dy  = yn - f32(yi);
 
+                // NOTE: operates as an override of previous node in history
                 if (gamma < dx && dx < 1.0f - gamma) {
                     if (gamma < dy && dy < 1.0f - gamma) {
                         mouse_target_x = xi;
                         mouse_target_y = yi;
                         hover_idx = IDX(mouse_target_x, mouse_target_y);
-                        board_data[hover_idx] |= BOARD_FLAG_HOVER;
+                        history_ptr->prev->board_data[hover_idx] |= BOARD_FLAG_HOVER; 
+                        history_ptr->prev->hover_idx = hover_idx;
                     }
                 }
 
             } 
 
             if (event.type == INPUT_TYPE_MOUSE_PRESS) {
-                if (event.mouse_button & 0x2) {
+                if (!handled && event.mouse_button & 0x2) {
                     // move cursor to hover
                     if (hover_idx < 0xFF) {
                         board_data[cursor_idx] &= ~BOARD_FLAG_CURSOR;
 
                         cursor_x = mouse_target_x;
                         cursor_y = mouse_target_y;
-                        u8 cursor_idx = IDX(cursor_x, cursor_y);
+                        cursor_idx = IDX(cursor_x, cursor_y);
 
                         board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+                        board_input      = 1;
+                        board_input_type = LIST_SKIP;
                     }
+
+                    handled = 1;
                 }
             }
 
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
-                history_ptr         = list_copy(history_ptr);
-                board_data          = history_ptr->board_data;
-                u8 board_input_type = LIST_OTHER;
-
+                // quit or clear
                 if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
                     waiting_for_solution = false;
 
@@ -884,6 +1092,7 @@ void main() {
                         }
                     }
                     
+                    // FIXME: you probably doing want to do this only when theres a key press event....
                     // perform solution iteration
                     if (waiting_for_solution) {
                         if (!made_progress) {
@@ -902,6 +1111,14 @@ void main() {
                     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
                     board_input = 1;
                     handled = 1;
+                }
+
+
+                // new puzzle
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_N)) {
+                    generate_puzzle(board_data);
+                    handled     = 1;
+                    board_input = 1;
                 }
 
 
@@ -934,10 +1151,14 @@ void main() {
                         u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
                             u16 target = 1 << (event.key-GLFW_KEY_1);
-                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] &= ~BOARD_FLAG_PENCIL;}                              // clear pencil flag
-                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~0x1FF | (board_data[idx] & target)); // clear digits
-                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] ^= target;}                                          // pre-empt placement
-                            board_data[idx] ^= target;                                                                            // toggle digit
+                            // clear pencil flag
+                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] &= ~BOARD_FLAG_PENCIL;}                              
+                            // clear digits
+                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~0x1FF | (board_data[idx] & target)); 
+                            // pre-empt placement
+                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] ^= target;}                                          
+                            // toggle digit
+                            board_data[idx] ^= target;                                                                            
                         }
                         handled = 1;
                         board_input = 1;
@@ -984,7 +1205,11 @@ void main() {
                     
                     cursor_x   = history_ptr->cursor_x;
                     cursor_y   = history_ptr->cursor_y;
+                    cursor_idx = IDX(cursor_x, cursor_y);
+
                     board_data = history_ptr->board_data;
+                    board_data[history_ptr->hover_idx] &= ~BOARD_FLAG_HOVER;
+                    hover_idx = 0xFF;
                 }
 
                 // hard undo
@@ -998,10 +1223,13 @@ void main() {
                         list_free(tmp);
                     }
                     
-                    hover_idx  = 0xFF;
                     cursor_x   = history_ptr->cursor_x;
                     cursor_y   = history_ptr->cursor_y;
+                    cursor_idx = IDX(cursor_x, cursor_y);
+
                     board_data = history_ptr->board_data;
+                    board_data[history_ptr->hover_idx] &= ~BOARD_FLAG_HOVER;
+                    hover_idx = 0xFF;
                 }
 
                 // quick paste
@@ -1073,22 +1301,27 @@ void main() {
                     }
                 }
 
-                if (!board_input) {
-                    if (!board_undo) {
-                        ListItem* tmp = history_ptr;
-                        history_ptr = history_ptr->prev;
-                        board_data  = history_ptr->board_data;
-                        list_free(tmp);
-                    }
-                } else {
-                    history_ptr->type = board_input_type;
-                    check_errors(board_data);
-                    history_ptr->cursor_x = cursor_x;
-                    history_ptr->cursor_y = cursor_y;
-                }
 
+            } // end of key press
+
+
+            // alter board history
+            if (!board_input) {
+                // if there was an undo, handle the history cleanup in there
+                if (!board_undo) {
+                    ListItem* tmp = history_ptr;
+                    history_ptr = history_ptr->prev;
+                    board_data  = history_ptr->board_data;
+                    list_free(tmp);
+                }
+            } else {
+                history_ptr->type = board_input_type;
+                check_errors(board_data);
+                history_ptr->cursor_x = cursor_x;
+                history_ptr->cursor_y = cursor_y;
             }
-        }
+
+        } // end of events
 
         input_index = 0;
 
