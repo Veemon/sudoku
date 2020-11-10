@@ -688,13 +688,63 @@ const u8 puzzles[16][81] = {
     }
 };
 
+
+void swap_col(u16* board, u8 a, u8 b) {
+    for (u8 i = 0; i < 9; i++) {
+        u16 tmp = board[IDX(a, i)];
+        board[IDX(a, i)] = board[IDX(b, i)];
+        board[IDX(b, i)] = tmp;
+    }
+}
+
+void swap_row(u16* board, u8 a, u8 b) {
+    for (u8 i = 0; i < 9; i++) {
+        u16 tmp = board[IDX(i, a)];
+        board[IDX(i, a)] = board[IDX(i, b)];
+        board[IDX(i, b)] = tmp;
+    }
+}
+
+u8 puzzle_idx = 0;
 void generate_puzzle(u16* board) {
-    printf("new puzzle\n");
-    for (u8 i = 0; i < 9; i++){ 
-        for (u8 j = 0; j < 9; j++){ 
-            board[IDX(i,j)] = BOARD_FLAG_STATIC & (1 << i);
+    // grab puzzle and apply mapping
+    u8 mapping[] = {1,2,3,4,5,6,7,8,9};
+    for (u8 i = 0; i < 8; i++) {
+        u8 idx       = i + rand() / (RAND_MAX / (9 - i) + 1);
+        u8 tmp       = mapping[idx];
+        mapping[idx] = mapping[i];
+        mapping[i]   = tmp;
+    }
+    
+    for (u16 j = 0; j < 9; j++) { 
+        for (u16 i = 0; i < 9; i++) { 
+            u16 x;
+            x = puzzles[puzzle_idx][(j*9)+i];
+            x = mapping[x - 1];
+            board[IDX(i,j)] = BOARD_FLAG_STATIC | (1<<(x-1));
         }
     }
+
+    puzzle_idx = (puzzle_idx + 1) % 16; // global puzzle selector
+
+    // permute
+    for (u32 i = 0; i < 1000; i++) {
+        u32 a = rand() % 9;
+        u32 p = a % 3;
+
+        u32 b;
+        if      (p == 0) b = a + 1 + (rand() % 2);
+        else if (p == 2) b = a - 1 - (rand() % 2);
+        else if (p == 1) b = a + ((rand()%1) * 2 - 1)*(rand() % 1);
+
+        if (rand()%2 == 0) swap_row(board, a, b);
+        else               swap_col(board, a, b);
+    }
+
+    // TODO: 
+    // while valid:
+    // - hide tile
+    // - apply solver, seeing if solvable in N steps
 }
 
 
