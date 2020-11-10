@@ -36,13 +36,15 @@ void main() {
     bool  pencil_flag  = bool(info & 0x8000);
     bool  error_flag   = bool(info & 0x4000);
     bool  static_flag  = bool(info & 0x2000);
-    bool  entered_flag = !(static_flag || error_flag);
+    bool  solve_flag   = bool(info & 0x0400);
+    bool  entered_flag = !(static_flag || error_flag || solve_flag);
     float cursor       = float((info & 0x1000)>>12);
     float hover        = float((info & 0x0800)>>11);
 
     vec3 static_color       = vec3(0.07, 0.07, 0.07);
     vec3 entered_color      = vec3(0.15, 0.28, 0.50);
     vec3 error_color        = vec3(0.65, 0.2, 0.2);
+    vec3 solve_color        = vec3(0.43, 0.73, 0.11);
     vec3 static_error_color = vec3(0.77, 0.35, 0.12);
     vec3 hover_color        = vec3(0.33);
 
@@ -50,6 +52,7 @@ void main() {
     status_color      += float(static_flag)  * static_color;
     status_color      += float(entered_flag) * entered_color;
     status_color      += float(error_flag)   * error_color;
+    status_color      += float(solve_flag)   * solve_color;
     status_color      *= 1.0 - float(static_flag && error_flag);
     status_color      += float(static_flag && error_flag) * static_error_color;
     status_color       = clamp(status_color, 0.0, 1.0);

@@ -352,7 +352,7 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_FLAG_STATIC  0x2000
 #define BOARD_FLAG_CURSOR  0x1000
 #define BOARD_FLAG_HOVER   0x0800
-#define BOARD_FLAG_R2      0x0400
+#define BOARD_FLAG_SOLVE   0x0400
 #define BOARD_FLAG_R3      0x0200
 
 #define BOARD_DIM        16
@@ -402,7 +402,7 @@ void list_free(ListItem* node) {
 }
 
 
-void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
+u8 _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
     u16 cache[9][9];
     u8  indices[9];
 
@@ -428,8 +428,12 @@ void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
     }
 
     // check errors
+    u8 score = 0;
     for (u8 n = 0; n < 9; n++) {
-        if (indices[n] < 2) continue;
+        if (indices[n] < 2) {
+            if (indices[n] > 0) score++;
+            continue;
+        }
 
         // count members statics
         u8 entered_set = 0;
@@ -455,31 +459,52 @@ void _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
             }
         }
     }
+
+    return score;
 }
 
-void check_errors(u16* board_data) {
-    // clear errors
+void validate_board(u16* board_data) {
+    // clear errors and solves
     for (u8 y = 0; y < 9; y++) {
         for (u8 x = 0; x < 9; x++) {
-            board_data[IDX(x,y)] &= ~BOARD_FLAG_ERROR;
+            board_data[IDX(x,y)] &= ~(BOARD_FLAG_ERROR | BOARD_FLAG_SOLVE);
         }
     }
+
+    // each check is worth 9
+    // - 9 square checks
+    // - 9 row checks
+    // - 9 col checks
+    // => success = 9 * 9 * 3
+    u32 score = 0;
 
     // check squares
     for (u8 square_y = 0; square_y < 3; square_y++) {
         for (u8 square_x = 0; square_x < 3; square_x++) {
-            _check(board_data, square_x*3, (square_x+1)*3, square_y*3, (square_y+1)*3);
+            score += _check(board_data, square_x*3, (square_x+1)*3, square_y*3, (square_y+1)*3);
         }
     }
 
     // check rows
     for (u8 row = 0; row < 9; row++) {
-        _check(board_data, 0, 9, row, row+1);
+        score += _check(board_data, 0, 9, row, row+1);
     }
 
     // check cols
     for (u8 col = 0; col < 9; col++) {
-        _check(board_data, col, col+1, 0, 9);
+        score += _check(board_data, col, col+1, 0, 9);
+    }
+
+    // solve check
+    if (score >= 9*9*3) {
+        for (u8 j = 0; j < 9; j++) {
+            for (u8 i = 0; i < 9; i++) {
+                if (!(board_data[IDX(i,j)] & BOARD_FLAG_STATIC)) {
+                    board_data[IDX(i,j)] &= ~BOARD_FLAG_PENCIL;
+                    board_data[IDX(i,j)] |= BOARD_FLAG_SOLVE;
+                }
+            }
+        }
     }
 }
 
@@ -1167,6 +1192,8 @@ void main() {
                 // new puzzle
                 if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_N)) {
                     generate_puzzle(board_data);
+                    board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
+                    if (hover_idx != 0xFF) board_data[hover_idx] |= BOARD_FLAG_HOVER;
                     handled     = 1;
                     board_input = 1;
                 }
@@ -1360,15 +1387,15 @@ void main() {
                 // if there was an undo, handle the history cleanup in there
                 if (!board_undo) {
                     ListItem* tmp = history_ptr;
-                    history_ptr = history_ptr->prev;
-                    board_data  = history_ptr->board_data;
+                    history_ptr   = history_ptr->prev;
+                    board_data    = history_ptr->board_data;
                     list_free(tmp);
                 }
             } else {
-                history_ptr->type = board_input_type;
-                check_errors(board_data);
+                history_ptr->type     = board_input_type;
                 history_ptr->cursor_x = cursor_x;
                 history_ptr->cursor_y = cursor_y;
+                validate_board(board_data);
             }
 
         } // end of events
