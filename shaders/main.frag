@@ -40,6 +40,7 @@ void main() {
     bool  entered_flag = !(static_flag || error_flag || solve_flag);
     float cursor       = float((info & 0x1000)>>12);
     float hover        = float((info & 0x0800)>>11);
+    float ai_flag      = float((info & 0x0200)>>9);
 
     vec3 static_color       = vec3(0.07, 0.07, 0.07);
     vec3 entered_color      = vec3(0.15, 0.28, 0.50);
@@ -47,18 +48,23 @@ void main() {
     vec3 solve_color        = vec3(0.28, 0.68, 0.16);
     vec3 static_error_color = vec3(0.77, 0.35, 0.12);
     vec3 hover_color        = vec3(0.33);
+    vec3 ai_color           = vec3(0.60, 0.10, 0.50);
 
     vec3 status_color  = vec3(0.0);
     status_color      += float(static_flag)  * static_color;
     status_color      += float(entered_flag) * entered_color;
     status_color      += float(error_flag)   * error_color;
     status_color      += float(solve_flag)   * solve_color;
-    status_color      *= 1.0 - float(static_flag && error_flag);
-    status_color      += float(static_flag && error_flag) * static_error_color;
+    status_color      *= (1.0 - ai_flag);                                           // override
+    status_color      += ai_flag * ai_color;
+    status_color      *= 1.0 - (1.0 - ai_flag) * float(static_flag && error_flag);  // override
+    status_color      += (1.0 - ai_flag) * float(static_flag && error_flag) * static_error_color;
     status_color       = clamp(status_color, 0.0, 1.0);
 
     // NOTE: ideally this is a lot better done in HSV
-    vec3 cursor_color = vec3(0.785) + status_color*0.45;
+    vec3 cursor_color;
+    cursor_color = vec3(0.785) + status_color*0.45;
+    ai_color     = vec3(0.815) + status_color*0.65;
 
     float overlap = ceil((cursor-hover)*(cursor-hover));
     hover_color *= overlap;
@@ -82,6 +88,23 @@ void main() {
     }
 
 
+
+    // AI
+    {
+        float eps   = 0.60; // outer circle
+        float r     = 0.35;  // inner circle
+        
+        float lr = (r/2);
+        float hr = 1.0 - (r/2);
+
+        float shade = 1.0;
+        shade *= smoothstep(lr-eps, lr, cell_coord.x) * smoothstep(cell_coord.x-eps, cell_coord.x, hr);
+        shade *= smoothstep(lr-eps, lr, cell_coord.y) * smoothstep(cell_coord.y-eps, cell_coord.y, hr);
+
+        frag_color.rgb *= 1 - ai_flag;
+        frag_color.rgb += ai_flag * ai_color * shade * 1.04; // oversaturate
+        frag_color = clamp(frag_color, 0.0, 1.0);
+    }
 
     // cursor
     {
@@ -185,7 +208,7 @@ void main() {
 
     // grid Lines
     {
-        float eps = hover*0.010 + (1.0-hover)*0.0065;
+        float eps = hover*0.0092 + (1.0-hover)*0.0065;
 
         const float r[3]       = float[3](1.0/3.0, 1.0/9.0, 1.0/27.0);
         const float weights[3] = float[3](0.007, 0.015, 0.025);
@@ -202,13 +225,13 @@ void main() {
             w = weights[j] / 2.0;
             s = shades[j];
 
-            float e = eps * ( hover*float(j==1) + (1.0 - hover) );
+            float e = eps;
 
             mask = 0.0;
             mask += smoothstep(0.0-w-e, 0.0-w, uv.x) * smoothstep(uv.x-e, uv.x, 0.0+w); // left
-            mask += smoothstep(1.0-w-e, 1.0-w, uv.x) * smoothstep(uv.x+e, uv.x, 1.0+w); // right
+            mask += smoothstep(1.0-w-e, 1.0-w, uv.x) * smoothstep(uv.x-e, uv.x, 1.0+w); // right
             mask += smoothstep(0.0-w-e, 0.0-w, uv.y) * smoothstep(uv.y-e, uv.y, 0.0+w); // up
-            mask += smoothstep(1.0-w-e, 1.0-w, uv.y) * smoothstep(uv.y+e, uv.y, 1.0+w); // down
+            mask += smoothstep(1.0-w-e, 1.0-w, uv.y) * smoothstep(uv.y-e, uv.y, 1.0+w); // down
             mask = clamp(mask, 0.0, 1.0);
 
             frag_color.rgb *= (1.0 - mask);

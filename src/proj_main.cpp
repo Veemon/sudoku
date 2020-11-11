@@ -345,7 +345,7 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_7            0x40
 #define BOARD_8            0x80
 #define BOARD_9            0x100
-#define BOARD_ALL          0xFFF
+#define BOARD_ALL          0x1FF
 
 #define BOARD_FLAG_PENCIL  0x8000
 #define BOARD_FLAG_ERROR   0x4000
@@ -353,7 +353,7 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_FLAG_CURSOR  0x1000
 #define BOARD_FLAG_HOVER   0x0800
 #define BOARD_FLAG_SOLVE   0x0400
-#define BOARD_FLAG_R3      0x0200
+#define BOARD_FLAG_AI      0x0200
 
 #define BOARD_DIM        16
 #define BOARD_SIZE       BOARD_DIM * BOARD_DIM
@@ -440,7 +440,7 @@ u8 _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
         u8 static_set  = 0;
         for (u8 i = 0; i < 9; i++) {
             if (i >= indices[n]) break;
-            if (!(board_data[cache[n][i]] & 0x1ff)) continue;
+            if (!(board_data[cache[n][i]] & BOARD_ALL)) continue;
             if (!(board_data[cache[n][i]] & BOARD_FLAG_PENCIL)) entered_set++;
             if   (board_data[cache[n][i]] & BOARD_FLAG_STATIC)  static_set++;
         }
@@ -463,7 +463,7 @@ u8 _check(u16* board_data, u8 lx, u8 hx, u8 ly, u8 hy) {
     return score;
 }
 
-void validate_board(u16* board_data) {
+u8 validate_board(u16* board_data) {
     // clear errors and solves
     for (u8 y = 0; y < 9; y++) {
         for (u8 x = 0; x < 9; x++) {
@@ -505,26 +505,109 @@ void validate_board(u16* board_data) {
                 }
             }
         }
+        return 1;
+    }
+    return 0;
+}
+
+
+
+#define PROGRESS_DEFAULT        0   // no state change
+#define PROGRESS_STATE_CHANGE   1   // state change
+#define PROGRESS_INV_CELL       2   // invalid cell
+#define PROGRESS_SET_CELL       3   // cell solved
+
+#define DEDUCE() {\
+    bool cell_static = board[cmp_idx] & BOARD_FLAG_STATIC;\
+    bool cell_pencil = board[cmp_idx] & BOARD_FLAG_PENCIL;\
+    if (cell_static || !cell_pencil) {\
+        u16 tmp = board[base_idx] & BOARD_ALL;\
+        board[base_idx] &= ~(BOARD_ALL & board[cmp_idx]);\
+        if (tmp != (board[base_idx] & BOARD_ALL)) {\
+            state_change = PROGRESS_STATE_CHANGE;\
+        }\
+    }\
+}
+
+#define INK() {\
+    u8 tmp = 0;\
+    for (u16 n = 0; n < 9; n++) tmp += ((1<<n) & board[base_idx])>>n;\
+    if (tmp == 1) {\
+        board[base_idx] &= ~(BOARD_FLAG_PENCIL);\
+        state_change     = PROGRESS_SET_CELL;\
+    }\
+}
+
+void set_pencils(u16* board) {
+    // set non-statics to full pencils
+    for (u32 j = 0; j < 9; j++) {
+        for (u32 i = 0; i < 9; i++) {
+            if (!(board[IDX(i,j)] & BOARD_FLAG_STATIC)) {
+                board[IDX(i,j)] |= BOARD_FLAG_PENCIL | BOARD_ALL;
+            }
+        }
     }
 }
 
-// TODO solve the AI
+/*
+FIXME
+implement tree search for something like this,
 
-#define PROGRESS_NONE   0
-#define PROGRESS_CLEAR  1
+300200000
+000107000
+706030500
+070009080
+900020004
+010800050
+009040301
+000702000
+000008006
+*/
+u8 make_progress(u16* board, u32 base_x, u32 base_y, u8 stage) {
+    u8 state_change = PROGRESS_DEFAULT;
 
-void make_progress(u8* report, u16* board_data) {
-    if (*report == PROGRESS_NONE) {
+    // skip statics and already set cells
+    u32 base_idx = IDX(base_x, base_y);
+    {
+        bool cell_static = board[base_idx] & BOARD_FLAG_STATIC;
+        bool cell_pencil = board[base_idx] & BOARD_FLAG_PENCIL;
+        if (cell_static || !cell_pencil) return PROGRESS_INV_CELL;
+    }
 
-        // TODO: this is test code, and we seg fault
-        for (u8 j = 0; j < 9; j++) {
-            for (u8 i = 0; i < 9; i++) {
-                board_data[IDX(i,j)] = BOARD_EMPTY;
+    u8 set = 0;
+
+    // check square
+    if (stage == 0) {
+        for (u32 cmp_y = 0; cmp_y < 3; cmp_y++) {
+            for (u32 cmp_x = 0; cmp_x < 3; cmp_x++) {
+                u32 cmp_inner_x = (base_x/3)*3+cmp_x;
+                u32 cmp_inner_y = (base_y/3)*3+cmp_y;
+                u32 cmp_idx = IDX(cmp_inner_x, cmp_inner_y);
+                DEDUCE();
             }
         }
-
-        *report = PROGRESS_CLEAR;
+        INK();
     }
+    
+    // check row
+    if (stage == 1) {
+        for (u32 cmp_x = 0; cmp_x < 9; cmp_x++) {
+            u32 cmp_idx = IDX(cmp_x, base_y);
+            DEDUCE();
+        }
+        INK();
+    }
+
+    // check col
+    if (stage == 2) {
+        for (u32 cmp_y = 0; cmp_y < 9; cmp_y++) {
+            u32 cmp_idx = IDX(base_x, cmp_y);
+            DEDUCE();
+        }
+        INK();
+    }
+
+    return state_change;
 }
 
 
@@ -766,7 +849,7 @@ void generate_puzzle(u16* board) {
         else               swap_col(board, a, b);
     }
 
-    // TODO: 
+    // FIXME: 
     // while valid:
     // - hide tile
     // - apply solver, seeing if solvable in N steps
@@ -996,7 +1079,7 @@ void main() {
     glBindVertexArray(vao);
 
 
-    // mouse synch
+    // mouse sync
     i8 mouse_target_x;
     i8 mouse_target_y;
     u8 hover_idx = 0xFF;
@@ -1014,16 +1097,27 @@ void main() {
 
     f32 delta_s = 0.0;
 
+    f32 solve_wait   = 0.032;
+    f32 solve_timer  = solve_wait;
+
     f32 render_wait  = 1.0 / f32(monitor_rate);
     f32 render_timer = render_wait;
 
+
+    // game
     i8 cursor_x = 4;
     i8 cursor_y = 4;
     u32 cursor_idx = IDX(cursor_x, cursor_y);
     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
 
     bool waiting_for_solution = false;
-    u8 progress_report = PROGRESS_NONE;
+
+    u32 base_x = 0, clear_x = 0;
+    u32 base_y = 0, clear_y = 0;
+    u8  stage  = 0;
+
+    u16 board_iterations   = 0;
+    u16 stagnation_counter = 0xFFFF; 
 
     while (!glfwWindowShouldClose(window))
     {
@@ -1069,8 +1163,6 @@ void main() {
             u8 board_undo       = 0;            // set this for a board undo
             u8 board_input      = 0;            // set this if there was a board change
             u8 board_input_type = LIST_OTHER;   // set this to LIST_SKIP if skippable in undo chain
-
-            u8 made_progress = 0; // FIXME: how does this work again? maybe not in event loop?
 
 
 
@@ -1139,10 +1231,14 @@ void main() {
 
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
+                // FIXME: segfault with escape + ctrl-n + ctrl-z
+
+                if (waiting_for_solution) {
+                    waiting_for_solution = false;
+                }
+
                 // quit or clear
                 if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
-                    waiting_for_solution = false;
-
                     // quit
                     if (event.mod & GLFW_MOD_SHIFT) return;
 
@@ -1153,29 +1249,34 @@ void main() {
                 }
 
                 // check - solve
-                if (waiting_for_solution || KEY_UP(GLFW_KEY_ENTER)) {
+                if (KEY_UP(GLFW_KEY_ENTER)) {
                     // check if there's statics
                     if (!waiting_for_solution) {
                         for (u8 j = 0; j < 9; j++) {
                             for (u8 i = 0; i < 9; i++) {
                                 if (board_data[IDX(i,j)] & BOARD_FLAG_STATIC) {
+                                    set_pencils(board_data);
+
+                                    solve_timer          = solve_wait;
                                     waiting_for_solution = true;
+                                    base_x               = 0;
+                                    base_y               = 0;
+                                    clear_x              = 0;
+                                    clear_y              = 0;
+                                    board_iterations     = 0;
+
+                                    board_input          = 1;
+
                                     break;
                                 }
                             }
                             if (waiting_for_solution) break;
                         }
+                    } else {
+                        waiting_for_solution = false;
                     }
-                    
-                    // FIXME: you probably doing want to do this only when theres a key press event....
-                    // perform solution iteration
-                    if (waiting_for_solution) {
-                        if (!made_progress) {
-                            make_progress(&progress_report, board_data);
-                            made_progress = 1;
-                        }
-                        continue;
-                    }
+
+                    handled = 1;
                 }
 
                 // board clear
@@ -1196,6 +1297,20 @@ void main() {
                     if (hover_idx != 0xFF) board_data[hover_idx] |= BOARD_FLAG_HOVER;
                     handled     = 1;
                     board_input = 1;
+                }
+
+
+                // retry (remove all non statics)
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_R)) {
+                    handled     = 1;
+                    board_input = 1;
+                    for (u32 j = 0; j < 9; j++){
+                        for (u32 i = 0; i < 9; i++){
+                            if (!(board_data[IDX(i,j)] & BOARD_FLAG_STATIC)) {
+                                board_data[IDX(i,j)] &= ~(BOARD_ALL | BOARD_FLAG_PENCIL);
+                            }
+                        }
+                    }
                 }
 
 
@@ -1231,7 +1346,7 @@ void main() {
                             // clear pencil flag
                             if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] &= ~BOARD_FLAG_PENCIL;}                              
                             // clear digits
-                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~0x1FF | (board_data[idx] & target)); 
+                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~BOARD_ALL | (board_data[idx] & target)); 
                             // pre-empt placement
                             if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] ^= target;}                                          
                             // toggle digit
@@ -1243,7 +1358,7 @@ void main() {
                 }
 
                 // keyboard static mode
-                if (!handled && KEY_DOWN(GLFW_KEY_TAB) && (board_data[cursor_idx] & 0x1ff)) {
+                if (!handled && KEY_DOWN(GLFW_KEY_TAB) && (board_data[cursor_idx] & BOARD_ALL)) {
                     board_data[cursor_idx] ^= BOARD_FLAG_STATIC;
                     handled = 1;
                     board_input = 1;
@@ -1266,6 +1381,8 @@ void main() {
 
                 // undo
                 if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_Z)) {
+                    // FIXME this seems to seg fault if u spam enter and then undo
+
                     handled    = 1;
                     board_undo = 1;
 
@@ -1399,9 +1516,94 @@ void main() {
             }
 
         } // end of events
-
         input_index = 0;
 
+
+        // make solution progress
+        if (waiting_for_solution) {
+            if (solve_timer >= solve_wait) {
+                solve_timer = 0;
+ 
+                u8 status = PROGRESS_INV_CELL; 
+                while(status == PROGRESS_INV_CELL) {
+                    status = make_progress(board_data, base_x, base_y, stage);
+                    
+                    // keep track of stagnation
+                    if (stagnation_counter == 0xFFFF && status == PROGRESS_DEFAULT) {
+                        stagnation_counter = board_iterations;
+                    }
+
+                    // color if there was a state change
+                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL) {
+                        board_data[IDX(clear_x, clear_y)] &= ~(BOARD_FLAG_AI);
+                        board_data[IDX(base_x, base_y)] |= BOARD_FLAG_AI;
+                        clear_x                          = base_x;
+                        clear_y                          = base_y;
+                        stagnation_counter               = 0xFFFF;
+                    } else {
+                        board_data[IDX(clear_x, clear_y)] |= BOARD_FLAG_AI;
+                    }
+
+                    // no state change => time to give up
+                    if (stagnation_counter != 0xFFFF && board_iterations - stagnation_counter > 1) {
+                        printf("[AI] nothing to do\n");
+
+                        board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
+                        board_data[IDX(base_x, base_y)]   &= ~BOARD_FLAG_AI;
+
+                        waiting_for_solution = false;
+                        board_iterations     = 0xFFFF;
+
+                        base_x  = 0;
+                        base_y  = 0;
+                        clear_x = 0;
+                        clear_y = 0;
+
+                        break;
+                    }
+
+                    // board solved => time to stop
+                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL){
+                        if (validate_board(board_data)) {
+                            printf("[AI] solved\n");
+
+                            board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
+                            board_data[IDX(base_x, base_y)]   &= ~BOARD_FLAG_AI;
+
+                            waiting_for_solution = false;
+                            board_iterations     = 0xFFFF;
+
+                            base_x  = 0;
+                            base_y  = 0;
+                            clear_x = 0;
+                            clear_y = 0;
+
+                            break;
+                        }
+                    } else {
+                        solve_timer = solve_wait;
+                    }
+
+                    printf("[AI] idx: (%u, %u)  stage: %u  status: %u    stag: %u    iter: %u\n", 
+                              base_x, base_y, stage, status, stagnation_counter, board_iterations);
+
+                   
+                    if (status == PROGRESS_INV_CELL) {
+                        stage = 0;
+                        base_x++;
+                        if (base_x > 8) { base_x = 0; base_y++; }
+                        if (base_y > 8) { base_y = 0; board_iterations++; }
+                    }
+                    else {
+                        stage++;
+                        if (status == PROGRESS_SET_CELL) stage = 3; // force increment
+                        if (stage  > 2) { stage  = 0; base_x++; }
+                        if (base_x > 8) { base_x = 0; base_y++; }
+                        if (base_y > 8) { base_y = 0; board_iterations++; }
+                    }
+                }
+            }
+        }
 
 
         // uniforms
@@ -1430,6 +1632,11 @@ void main() {
         glfwSwapBuffers(window);
 
 
+        
+        // reset AI flags
+        board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
+
+
 
         // timing
         QueryPerformanceCounter(&end_time);
@@ -1437,9 +1644,10 @@ void main() {
         delta_ms.QuadPart *= 1000;
         delta_ms.QuadPart /= cpu_freq.QuadPart;
         delta_s = f32(delta_ms.QuadPart) / 1000.f;
-        total_time += delta_s;
 
-        render_timer    += delta_s;
+        total_time   += delta_s;
+        render_timer += delta_s;
+        solve_timer  += delta_s;
     }
 
     glfwDestroyWindow(window);

@@ -18,4 +18,5 @@
 * `Alt+Z`       to undo to beginning
 * `Ctrl+N`      to generate a new puzzle
 * `Ctrl+V`      to paste a puzzle from your clipboard
+* `Ctrl+R`      to retry, removing all non-permenant cells
 * `Enter`       to automatically solve
