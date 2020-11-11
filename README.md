@@ -16,6 +16,6 @@
 * `Backspace`   to clear the board
 * `Ctrl+Z`      to undo
 * `Alt+Z`       to undo to beginning
-* 'Ctrl+N'      to generate a new puzzle
+* `Ctrl+N`      to generate a new puzzle
 * `Ctrl+V`      to paste a puzzle from your clipboard
 * `Enter`       to automatically solve

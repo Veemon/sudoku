@@ -44,7 +44,7 @@ void main() {
     vec3 static_color       = vec3(0.07, 0.07, 0.07);
     vec3 entered_color      = vec3(0.15, 0.28, 0.50);
     vec3 error_color        = vec3(0.65, 0.2, 0.2);
-    vec3 solve_color        = vec3(0.43, 0.73, 0.11);
+    vec3 solve_color        = vec3(0.28, 0.68, 0.16);
     vec3 static_error_color = vec3(0.77, 0.35, 0.12);
     vec3 hover_color        = vec3(0.33);
 
@@ -62,22 +62,24 @@ void main() {
 
     float overlap = ceil((cursor-hover)*(cursor-hover));
     hover_color *= overlap;
-    hover_color += (1.0 - overlap) * (vec3(0.37) + status_color*0.35);
-
+    hover_color += (1.0 - overlap) * mix(vec3(0.35), status_color, 0.85);
+    hover_color  = clamp(hover_color, 0.0, 1.0);
 
 
     // grid shading
-    float eps = 0.005;
+    {
+        float eps = 0.005;
 
-    float shade_mask;
-    float shade_m1  = smoothstep(3.0-eps, 3.0, grid_id.x) * smoothstep(grid_id.x-eps, grid_id.x, 5.0);
-    float shade_m2  = smoothstep(3.0-eps, 3.0, grid_id.y) * smoothstep(grid_id.y-eps, grid_id.y, 5.0);
-    shade_mask      = shade_m1 + shade_m2;
-    shade_mask      = clamp(shade_mask, 0.0, 1.0);
-    shade_mask     -= shade_m1 * shade_m2;
-    
-    frag_color.rgb *= 1 - shade_mask;
-    frag_color.rgb += shade_mask * vec3(0.85);
+        float shade_mask = 0.0f;
+        float shade_m1  = smoothstep(3.0-eps, 3.0, grid_id.x) * smoothstep(grid_id.x-eps, grid_id.x, 5.0);
+        float shade_m2  = smoothstep(3.0-eps, 3.0, grid_id.y) * smoothstep(grid_id.y-eps, grid_id.y, 5.0);
+        shade_mask      = shade_m1 + shade_m2;
+        shade_mask      = clamp(shade_mask, 0.0, 1.0);
+        shade_mask     -= shade_m1 * shade_m2;
+        
+        frag_color.rgb *= 1 - shade_mask;
+        frag_color.rgb += shade_mask * vec3(0.85);
+    }
 
 
 
@@ -100,21 +102,24 @@ void main() {
 
     // hover
     {
-        float eps   = 0.5; // outer circle
-        float r     = 0.35;  // inner circle
-        
+        float eps = 0.50*(1.0 - cursor) + 0.85*cursor; // outer circle
+        float r   = 0.38*(1.0 - cursor) + 0.38*cursor; // inner circle
+
         float lr = (r/2);
         float hr = 1.0 - (r/2);
 
         float shade = 1.0;
         shade *= smoothstep(lr-eps, lr, cell_coord.x) * smoothstep(cell_coord.x-eps, cell_coord.x, hr);
         shade *= smoothstep(lr-eps, lr, cell_coord.y) * smoothstep(cell_coord.y-eps, cell_coord.y, hr);
+        shade  = (cursor * (shade-1.0f) * -1.0f) + ((1.0-cursor) * shade);
+
+        float bot = 0.45*cursor;
+        shade  = (shade+(2.0f * bot)) / (1.0f + 2.0f*bot);
 
         frag_color.rgb *= 1 - hover;
         frag_color.rgb += hover * hover_color * shade;
         frag_color = clamp(frag_color, 0.0, 1.0);
     }
-
 
 
     // digits
@@ -179,30 +184,36 @@ void main() {
 
 
     // grid Lines
-    const float r[3]       = float[3](1.0/3.0, 1.0/9.0, 1.0/27.0);
-    const float weights[3] = float[3](0.007, 0.015, 0.025);
-    const float shades[3]  = float[3](0.15, 0.5, 0.7);
+    {
+        float eps = hover*0.010 + (1.0-hover)*0.0065;
 
-    vec2 uv;
-    float s, w;
-    float mask;
-    for (int i = int(!pencil_flag); i < 3; i++) {
-        int j = 2 - i;
+        const float r[3]       = float[3](1.0/3.0, 1.0/9.0, 1.0/27.0);
+        const float weights[3] = float[3](0.007, 0.015, 0.025);
+        const float shades[3]  = float[3](0.15, 0.5, 0.7);
 
-        uv = mod(f_uv, r[j]) / r[j];
+        vec2 uv;
+        float s, w;
+        float mask;
+        for (int i = int(!pencil_flag); i < 3; i++) {
+            int j = 2 - i;
 
-        w = weights[j] / 2.0;
-        s = shades[j];
+            uv = mod(f_uv, r[j]) / r[j];
 
-        mask = 0.0;
-        mask += smoothstep(0.0-w-eps, 0.0-w, uv.x) * smoothstep(uv.x-eps, uv.x, 0.0 + w); // left
-        mask += smoothstep(1.0-w-eps, 1.0-w, uv.x) * smoothstep(uv.x-eps, uv.x, 1.0 + w); // right
-        mask += smoothstep(0.0-w-eps, 0.0-w, uv.y) * smoothstep(uv.y-eps, uv.y, 0.0 + w); // up
-        mask += smoothstep(1.0-w-eps, 1.0-w, uv.y) * smoothstep(uv.y-eps, uv.y, 1.0 + w); // down
-        mask = clamp(mask, 0.0, 1.0);
+            w = weights[j] / 2.0;
+            s = shades[j];
 
-        frag_color.rgb *= (1.0 - mask);
-        frag_color.rgb += mix(vec3(s) * mask, 0.9 * status_color * mask, cursor);
+            float e = eps * ( hover*float(j==1) + (1.0 - hover) );
+
+            mask = 0.0;
+            mask += smoothstep(0.0-w-e, 0.0-w, uv.x) * smoothstep(uv.x-e, uv.x, 0.0+w); // left
+            mask += smoothstep(1.0-w-e, 1.0-w, uv.x) * smoothstep(uv.x+e, uv.x, 1.0+w); // right
+            mask += smoothstep(0.0-w-e, 0.0-w, uv.y) * smoothstep(uv.y-e, uv.y, 0.0+w); // up
+            mask += smoothstep(1.0-w-e, 1.0-w, uv.y) * smoothstep(uv.y+e, uv.y, 1.0+w); // down
+            mask = clamp(mask, 0.0, 1.0);
+
+            frag_color.rgb *= (1.0 - mask);
+            frag_color.rgb += mix(vec3(s) * mask, 
+                    0.9 * mask * (status_color + hover*vec3(0.6)), cursor);
+        }
     }
-
 }
