@@ -42,15 +42,26 @@ goto COMPILE
     goto COMPILE
 
 :COMPILE
-set EXE_NAME=sudoku.exe
-cl %ARGS% /nologo /Fe%EXE_NAME% %INCLUDES% %SOURCE% /link %LIBRARIES% %LINK_ARGS%
+set NAME=sudoku
+cl %ARGS% /nologo /Fe%NAME%.exe %INCLUDES% %SOURCE% /link %LIBRARIES% %LINK_ARGS%
 if ERRORLEVEL 1 (
 	popd
 	exit /b 1
 )
 
-rcedit-x64.exe %EXE_NAME% --set-icon ..\res\icon.ico
-move %EXE_NAME% ..
+REM -- Add Icon
+rcedit-x64.exe %NAME%.exe --set-icon ..\res\icon.ico
+
+REM -- Make Archive
+tar -cf %NAME%.zip %NAME%.exe
+mv %NAME%.zip ..
+cd ..
+tar -rf %NAME%.zip res
+tar -rf %NAME%.zip shaders
+mv %NAME%.zip build/%NAME%.zip
+cd build
+
+move %NAME%.exe ..
 
 popd
 exit /b 0
