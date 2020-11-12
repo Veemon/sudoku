@@ -849,10 +849,85 @@ void generate_puzzle(u16* board) {
         else               swap_col(board, a, b);
     }
 
-    // FIXME: 
-    // while valid:
-    // - hide tile
-    // - apply solver, seeing if solvable in N steps
+// FIXME: for debugging solver
+#if 1
+
+    // TODO: do this in another thread?
+    // hide tiles until puzzle cannot be solved in N board iterations
+    #define N               18
+    #define ACCEPTED_FAILS  45
+    #define OUTPUT_BOARD() {\
+        for (u32 y = 0; y < 9; y++) {\
+            for (u32 x = 0; x < 9; x++) {\
+                u16 val = board[IDX(x,y)];\
+                if (val & BOARD_FLAG_PENCIL) { printf("0 "); continue; }\
+                val &= BOARD_ALL;\
+                u8 d;\
+                for (d = 0; d < 9; d++) { if ((val>>d) & 0x1) break; }\
+                printf("%u ", (d+1)%10);\
+            }\
+            printf("\n");\
+        }\
+        printf("\n");\
+    }
+
+    
+    u32  hidden[81] = {0};
+    u8   hidden_idx = 0;
+    u32  fails = 0;
+    while (1) {
+        // - hide tile
+        u32 rnd_x = rand() % 9;
+        u32 rnd_y = rand() % 9;
+        u32 idx = IDX(rnd_x, rnd_y);
+
+        // save, and skip if already hidden
+        u16 tmp = board[idx];
+        board[idx] = BOARD_EMPTY;
+        if (board[idx] == tmp) continue;
+
+        u8 solved = 0;
+        set_pencils(board);
+        for (u32 n = 0; n < N; n++) {
+            // - solve
+            for (u32 y = 0; y < 9; y++) {
+                for (u32 x = 0; x < 9; x++) {
+                    for (u32 s = 0; s < 3; s++) {
+                        u8 status = make_progress(board, x, y, s);
+                        if (status == PROGRESS_INV_CELL) break; 
+                    }
+                }
+            }
+
+            // if we solved it, add the hidden tile to our collection
+            // and retry another tile
+            solved = validate_board(board);
+            if (solved) {
+                hidden[hidden_idx] = idx;
+                hidden_idx++;
+                break;
+            } 
+        }
+
+        // rehide tiles
+        for (u8 i = 0; i < hidden_idx; i++) {
+            board[hidden[i]] = BOARD_EMPTY;
+        }
+
+        // if we couldn't solve it, undo the tile placement and record a fail
+        if (!solved) {
+            fails++;
+            board[idx] = tmp;
+            if (fails > ACCEPTED_FAILS) break;
+        }
+
+    }
+
+    #undef N
+    #undef ACCEPTED_FAILS
+    #undef OUTPUT_BOARD
+
+#endif
 }
 
 
@@ -886,7 +961,7 @@ void main() {
     i32 window_width  = f32(monitor_height) * 0.9;
     i32 window_height = f32(monitor_height) * 0.9;
 
-    GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Sudoku 2077", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Sudoku", NULL, NULL);
     if (window == NULL) exit(-1);
 
     glfwSetWindowPos(window,
@@ -1112,8 +1187,8 @@ void main() {
 
     bool waiting_for_solution = false;
 
-    u32 base_x = 0, clear_x = 0;
-    u32 base_y = 0, clear_y = 0;
+    u32 base_x = 0, clear_x = 0xff;
+    u32 base_y = 0, clear_y = 0xff;
     u8  stage  = 0;
 
     u16 board_iterations   = 0;
@@ -1152,7 +1227,6 @@ void main() {
 
         // event handling
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
-
             // reset for new event
             InputEvent event = input_queue[event_idx];
 
@@ -1163,7 +1237,6 @@ void main() {
             u8 board_undo       = 0;            // set this for a board undo
             u8 board_input      = 0;            // set this if there was a board change
             u8 board_input_type = LIST_OTHER;   // set this to LIST_SKIP if skippable in undo chain
-
 
 
             // mouse coords [0,1] -> [-ratio_delta, 1 + ratio_delta]
@@ -1233,10 +1306,6 @@ void main() {
             if (event.type == INPUT_TYPE_KEY_PRESS) {
                 // FIXME: segfault with escape + ctrl-n + ctrl-z
 
-                if (waiting_for_solution) {
-                    waiting_for_solution = false;
-                }
-
                 // quit or clear
                 if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
                     // quit
@@ -1255,28 +1324,36 @@ void main() {
                         for (u8 j = 0; j < 9; j++) {
                             for (u8 i = 0; i < 9; i++) {
                                 if (board_data[IDX(i,j)] & BOARD_FLAG_STATIC) {
-                                    set_pencils(board_data);
-
                                     solve_timer          = solve_wait;
                                     waiting_for_solution = true;
                                     base_x               = 0;
                                     base_y               = 0;
-                                    clear_x              = 0;
-                                    clear_y              = 0;
+                                    clear_x              = 0xff;
+                                    clear_y              = 0xff;
                                     board_iterations     = 0;
-
                                     board_input          = 1;
-
                                     break;
                                 }
                             }
-                            if (waiting_for_solution) break;
+                            if (waiting_for_solution) {
+                                set_pencils(board_data);
+                                break;
+                            }
                         }
-                    } else {
-                        waiting_for_solution = false;
                     }
-
                     handled = 1;
+                } 
+                else {
+                    // didn't press enter, then if were currently solving we should stop
+                    // FIXME: even though we clear it here, it somehow isn't cleared at render time?
+                    if (waiting_for_solution) {
+                        waiting_for_solution = false;
+                        for (u32 j = 0; j < 9; j++) {
+                            for (u32 i = 0; i < 9; i++) {
+                                board_data[IDX(i,j)] &= ~BOARD_FLAG_AI;
+                            }
+                        }
+                    }
                 }
 
                 // board clear
@@ -1495,7 +1572,6 @@ void main() {
                     }
                 }
 
-
             } // end of key press
 
 
@@ -1519,74 +1595,60 @@ void main() {
         input_index = 0;
 
 
+        // FIXME: crashes on board full of statics
         // make solution progress
         if (waiting_for_solution) {
             if (solve_timer >= solve_wait) {
-                solve_timer = 0;
+                solve_timer -= solve_wait;
  
                 u8 status = PROGRESS_INV_CELL; 
                 while(status == PROGRESS_INV_CELL) {
                     status = make_progress(board_data, base_x, base_y, stage);
-                    
+
                     // keep track of stagnation
                     if (stagnation_counter == 0xFFFF && status == PROGRESS_DEFAULT) {
                         stagnation_counter = board_iterations;
                     }
 
-                    // color if there was a state change
                     if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL) {
-                        board_data[IDX(clear_x, clear_y)] &= ~(BOARD_FLAG_AI);
-                        board_data[IDX(base_x, base_y)] |= BOARD_FLAG_AI;
-                        clear_x                          = base_x;
-                        clear_y                          = base_y;
-                        stagnation_counter               = 0xFFFF;
+                        // color if there was a state change
+                        if (clear_x != 0xff && clear_y != 0xff) {
+                            board_data[IDX(clear_x, clear_y)] &= ~(BOARD_FLAG_AI);
+                        }
+
+                        board_data[IDX(base_x, base_y)]   |= BOARD_FLAG_AI;
+                        clear_x                            = base_x;
+                        clear_y                            = base_y;
+                        stagnation_counter                 = 0xFFFF;
                     } else {
+                        // color the previous altered cell if there wasn't
                         board_data[IDX(clear_x, clear_y)] |= BOARD_FLAG_AI;
                     }
 
-                    // no state change => time to give up
-                    if (stagnation_counter != 0xFFFF && board_iterations - stagnation_counter > 1) {
-                        printf("[AI] nothing to do\n");
-
-                        board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
-                        board_data[IDX(base_x, base_y)]   &= ~BOARD_FLAG_AI;
+                    // p1: no state change => time to give up
+                    // p3: board solved => time to stop
+                    bool p1 = (stagnation_counter != 0xFFFF && board_iterations - stagnation_counter > 1);
+                    bool p2 = (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL);
+                    u8 p3 = 0;
+                    if (!p1 && p2) p3 = validate_board(board_data);
+                    if (p1 || p3) {
+                        if (clear_x != 0xff && clear_y != 0xff) {
+                            board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
+                        }
 
                         waiting_for_solution = false;
                         board_iterations     = 0xFFFF;
 
                         base_x  = 0;
                         base_y  = 0;
-                        clear_x = 0;
-                        clear_y = 0;
+                        clear_x = 0xff;
+                        clear_y = 0xff;
 
                         break;
                     }
 
-                    // board solved => time to stop
-                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL){
-                        if (validate_board(board_data)) {
-                            printf("[AI] solved\n");
-
-                            board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
-                            board_data[IDX(base_x, base_y)]   &= ~BOARD_FLAG_AI;
-
-                            waiting_for_solution = false;
-                            board_iterations     = 0xFFFF;
-
-                            base_x  = 0;
-                            base_y  = 0;
-                            clear_x = 0;
-                            clear_y = 0;
-
-                            break;
-                        }
-                    } else {
-                        solve_timer = solve_wait;
-                    }
-
-                    printf("[AI] idx: (%u, %u)  stage: %u  status: %u    stag: %u    iter: %u\n", 
-                              base_x, base_y, stage, status, stagnation_counter, board_iterations);
-
+                    // nothing set, retry again next iteration
+                    if (!p2) solve_timer = solve_wait;
                    
                     if (status == PROGRESS_INV_CELL) {
                         stage = 0;
@@ -1634,7 +1696,9 @@ void main() {
 
         
         // reset AI flags
-        board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
+        //if (clear_x != 0xff && clear_y != 0xff) {
+        //    board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
+        //}
 
 
 
