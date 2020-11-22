@@ -976,6 +976,8 @@ void main() {
 	glfwSetScrollCallback(window, scroll_callback);
 	glfwSetKeyCallback(window, key_callback);
 
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+
     if (!gladLoadGL()) {
         fprintf(stderr, "Failed to initialize OpenGL loader!\n");
         exit(-1);
@@ -1120,26 +1122,49 @@ void main() {
 
 
 
-    // shaders
-    #define PATH_SHADER_VERT "./shaders/main.vert"
-    #define PATH_SHADER_FRAG "./shaders/main.frag"
+    // shaders: TODO abstract shader program?
+    #define PATH_SHADER_MAIN_VERT "./shaders/main.vert"
+    #define PATH_SHADER_MAIN_FRAG "./shaders/main.frag"
 
-    u8* info_log = nullptr;
-    GLuint shader_program = build_shader_program(PATH_SHADER_VERT, PATH_SHADER_FRAG, &info_log);
-    if (shader_program == NULL) {
+    u8* info_log;
+
+    info_log = nullptr;
+    GLuint shader_program_main = build_shader_program(PATH_SHADER_MAIN_VERT, PATH_SHADER_MAIN_FRAG, &info_log);
+    if (shader_program_main == NULL) {
         printf("[Error] Shader compilation failed.\n%s\n", info_log);
         return;
     }
 
-    GLuint u_proj  = glGetUniformLocation(shader_program, "proj");
-    GLuint u_model = glGetUniformLocation(shader_program, "model");
+    GLuint u_proj  = glGetUniformLocation(shader_program_main, "proj"); // TODO: uniform buffer objects?
+    GLuint u_model = glGetUniformLocation(shader_program_main, "model");
 
-    GLuint u_font  = glGetUniformLocation(shader_program, "font");
-    GLuint u_board = glGetUniformLocation(shader_program, "board");
+    GLuint u_font  = glGetUniformLocation(shader_program_main, "font");
+    GLuint u_board = glGetUniformLocation(shader_program_main, "board");
 
 
 
-    // orthogonal projection
+    #define PATH_SHADER_MOUSE_VERT "./shaders/mouse.vert"
+    #define PATH_SHADER_MOUSE_FRAG "./shaders/mouse.frag"
+
+    info_log = nullptr;
+    GLuint shader_program_mouse = build_shader_program(PATH_SHADER_MOUSE_VERT, PATH_SHADER_MOUSE_FRAG, &info_log);
+    if (shader_program_mouse == NULL) {
+        printf("[Error] Shader compilation failed.\n%s\n", info_log);
+        return;
+    }
+
+    GLuint u_proj_mouse  = glGetUniformLocation(shader_program_mouse, "proj"); // TODO: uniform buffer objects?
+    GLuint u_model_mouse = glGetUniformLocation(shader_program_mouse, "model");
+
+    GLuint u_mouse_mouse = glGetUniformLocation(shader_program_mouse, "mouse");
+    GLuint u_time_mouse  = glGetUniformLocation(shader_program_mouse, "time");
+
+
+
+
+    // orthogonal projection and scale matrice
+    glBindVertexArray(vao);
+
     mat4 proj;
     identity(&proj);
     f32 window_ratio = f32(window_width) / f32(window_height);
@@ -1148,10 +1173,11 @@ void main() {
     const f32 target_scale = 0.85f;
     mat4 scale;
     identity(&scale);
-    scale_mat4(&scale, {target_scale, target_scale, target_scale});
+    scale_mat4(&scale, {target_scale, target_scale, 1.0});
 
-    glUseProgram(shader_program);
-    glBindVertexArray(vao);
+    mat4 scale_mouse;
+    identity(&scale_mouse);
+
 
 
     // mouse sync
@@ -1180,6 +1206,11 @@ void main() {
 
 
     // game
+    f32 mouse_x = 0;
+    f32 mouse_y = 0;
+
+    f32 total_time_at_click = -1.0;
+
     i8 cursor_x = 4;
     i8 cursor_y = 4;
     u32 cursor_idx = IDX(cursor_x, cursor_y);
@@ -1216,11 +1247,13 @@ void main() {
             if (window_width > window_height) {
                 adx = (x_ratio - 1) / 2.0f;
                 project_orthographic(&proj, -x_ratio, x_ratio, -1.0f, 1.0f, 0.0f, 100.0f);
+                scale_mat4(&scale_mouse, {x_ratio, 1.0, 1.0});
             }
 
             if (window_height > window_width) {
                 ady = (y_ratio - 1) / 2.0f;
                 project_orthographic(&proj, -1.0f, 1.0f, -y_ratio, y_ratio, 0.0f, 100.0f);
+                scale_mat4(&scale_mouse, {1.0, y_ratio, 1.0});
             }
         }
 
@@ -1239,10 +1272,16 @@ void main() {
             u8 board_input_type = LIST_OTHER;   // set this to LIST_SKIP if skippable in undo chain
 
 
-            // mouse coords [0,1] -> [-ratio_delta, 1 + ratio_delta]
+            // mouse coords [0,dim] -> [0,1]
             f32 screen_x = event.mouse_position[0] / window_width;
             f32 screen_y = event.mouse_position[1] / window_height;
 
+            // FIXME: broken when window not square
+            // mouse coords [0,1] -> [0, 1 + ratio]
+            mouse_x = screen_x * (1.0f + adx);
+            mouse_y = screen_y * (1.0f + ady);
+
+            // mouse coords [0,1] -> [-ratio_delta, 1 + ratio_delta]
             screen_x = screen_x*(1.0f + adx + adx) - adx;
             screen_y = screen_y*(1.0f + ady + ady) - ady;
 
@@ -1284,7 +1323,7 @@ void main() {
             } 
 
             if (event.type == INPUT_TYPE_MOUSE_PRESS) {
-                if (!handled && event.mouse_button & 0x2) {
+                if (!handled && event.action == GLFW_PRESS && event.mouse_button & 0x2) {
                     // move cursor to hover
                     if (hover_idx < 0xFF) {
                         board_data[cursor_idx] &= ~BOARD_FLAG_CURSOR;
@@ -1298,6 +1337,7 @@ void main() {
                         board_input_type = LIST_SKIP;
                     }
 
+                    total_time_at_click = total_time;
                     handled = 1;
                 }
             }
@@ -1307,7 +1347,7 @@ void main() {
                 // FIXME: segfault with escape + ctrl-n + ctrl-z
 
                 // quit or clear
-                if (!handled && KEY_UP(GLFW_KEY_ESCAPE)) {
+                if (!handled && KEY_DOWN(GLFW_KEY_ESCAPE)) {
                     // quit
                     if (event.mod & GLFW_MOD_SHIFT) return;
 
@@ -1551,24 +1591,24 @@ void main() {
                 if (!handled && KEY_UP(GLFW_KEY_F5)) {
                     handled = 1;
 
-                    GLuint old_shader_program = shader_program;
-                    shader_program = build_shader_program(PATH_SHADER_VERT, PATH_SHADER_FRAG, &info_log);
-                    if (shader_program == NULL) {
+                    GLuint old_shader_program_main = shader_program_main;
+                    shader_program_main = build_shader_program(PATH_SHADER_MAIN_VERT, PATH_SHADER_MAIN_FRAG, &info_log);
+                    if (shader_program_main == NULL) {
                         printf("[Error] Shader compilation failed.\n%s\n", info_log);
-                        shader_program = old_shader_program;
+                        shader_program_main = old_shader_program_main;
                         free(info_log);
                     }
                     else {
                         printf("[Success] Shaders recompiled ... \n");
 
-                        u_proj  = glGetUniformLocation(shader_program, "proj");
-                        u_model = glGetUniformLocation(shader_program, "model");
+                        u_proj  = glGetUniformLocation(shader_program_main, "proj");
+                        u_model = glGetUniformLocation(shader_program_main, "model");
 
-                        u_font  = glGetUniformLocation(shader_program, "font");
-                        u_board = glGetUniformLocation(shader_program, "board");
+                        u_font  = glGetUniformLocation(shader_program_main, "font");
+                        u_board = glGetUniformLocation(shader_program_main, "board");
 
-                        glDeleteProgram(old_shader_program);
-                        glUseProgram(shader_program);
+                        glDeleteProgram(old_shader_program_main);
+                        glUseProgram(shader_program_main);
                     }
                 }
 
@@ -1667,28 +1707,41 @@ void main() {
             }
         }
 
-
-        // uniforms
-        glUniformMatrix4fv(u_proj,  1, GL_FALSE, &proj.a[0]);
-        glUniformMatrix4fv(u_model, 1, GL_FALSE, &scale.a[0]);
-
-        glUniform1i(u_font, 0);
-        glUniform1i(u_board, 1);
-
-        glActiveTexture(GL_TEXTURE0 + 0);
-        glBindTexture(GL_TEXTURE_2D, tex_font);
-
-        glActiveTexture(GL_TEXTURE0 + 1);
-        glBindTexture(GL_TEXTURE_2D, tex_board);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, BOARD_DIM, BOARD_DIM, GL_RED_INTEGER, GL_UNSIGNED_SHORT, board_data);
-
-
         // render
         if (render_timer >= render_wait) {
             render_timer -= render_wait;
 
             glClearColor(0.9f, 0.9f, 0.9f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
+
+            // main program 
+            glUseProgram(shader_program_main);
+
+            glUniformMatrix4fv(u_proj,  1, GL_FALSE, &proj.a[0]);
+            glUniformMatrix4fv(u_model, 1, GL_FALSE, &scale.a[0]);
+
+            glUniform1i(u_font, 0);
+            glUniform1i(u_board, 1);
+
+            glActiveTexture(GL_TEXTURE0 + 0);
+            glBindTexture(GL_TEXTURE_2D, tex_font);
+
+            glActiveTexture(GL_TEXTURE0 + 1);
+            glBindTexture(GL_TEXTURE_2D, tex_board);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, BOARD_DIM, BOARD_DIM, GL_RED_INTEGER, GL_UNSIGNED_SHORT, board_data);
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+            
+            // mouse program
+            glUseProgram(shader_program_mouse);
+
+            glUniformMatrix4fv(u_proj_mouse,  1, GL_FALSE, &proj.a[0]);
+            glUniformMatrix4fv(u_model_mouse, 1, GL_FALSE, &scale_mouse.a[0]);
+
+            glUniform2f(u_time_mouse, total_time, total_time_at_click);
+            glUniform2f(u_mouse_mouse, mouse_x, mouse_y);
+
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         }
         glfwSwapBuffers(window);
