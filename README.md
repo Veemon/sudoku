@@ -1,9 +1,9 @@
 # Sudoku
 
 ### TODO
-* have AI solve
-* finish puzzle generation
-* [optional] little sounds play
+* Refactor and Bugfix (history segfaults, shader abstraction)
+* Finish AI-solver (graph traversal)
+* Sound-Event System
 
 ### Keyboard Controls 
 * `WASD` or `arrow keys` for keyboard movement
