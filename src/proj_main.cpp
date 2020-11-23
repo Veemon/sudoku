@@ -3,7 +3,7 @@
 
 // third party
 #include "windows.h"
-#include "dshow.h"
+#include "dsound.h"
 #undef near
 #undef far
 
@@ -932,122 +932,59 @@ void generate_puzzle(u16* board) {
 #endif
 }
 
-template <class T> void SafeRelease(T **ppT)
-{
-    if (*ppT)
-    {
-        (*ppT)->Release();
-        *ppT = NULL;
-    }
-}
-
-HRESULT AddFilterByCLSID(
-    IGraphBuilder *pGraph,      // Pointer to the Filter Graph Manager.
-    REFGUID clsid,              // CLSID of the filter to create.
-    IBaseFilter **ppF,          // Receives a pointer to the filter.
-    LPCWSTR wszName             // A name for the filter (can be NULL).
-    )
-{
-    *ppF = 0;
-
-    IBaseFilter *pFilter = NULL;
-    
-    HRESULT hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, 
-        IID_PPV_ARGS(&pFilter));
-    if (FAILED(hr))
-    {
-        goto done;
-    }
-
-    hr = pGraph->AddFilter(pFilter, wszName);
-    if (FAILED(hr))
-    {
-        goto done;
-    }
-
-    *ppF = pFilter;
-    (*ppF)->AddRef();
-
-done:
-    SafeRelease(&pFilter);
-    return hr;
-}
 
 
-// FIXME: read this - https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/DirectShow/step-6--handle-graph-events.md
-// specifically, look at the case for WM_GRAPH_EVENT, a **custom** window event ...
-// => implies that we need to be doing the events for the window,
-//    perhaps time to ditch GLFW? lots of work though ...
-void sound_test(HWND hwnd) {
+void sound_test(HWND hwnd, LPDIRECTSOUNDBUFFER* main_buffer, LPDIRECTSOUNDBUFFER* off_buffer) {
     printf("[Audio] Beginning sound test\n");
-
-    IGraphBuilder* graph        = NULL;
-    IMediaControl* control      = NULL;
-    IMediaEventEx* event        = NULL;
-
-    IBaseFilter*   source         = NULL;
-    IFilterGraph2* graph2         = NULL;
-    IBaseFilter*   audio_renderer = NULL;
-    IEnumPins*     enum_pins      = NULL;
 
     HRESULT hr = NULL;
 
+    #define DEBUG_ERROR(x)      if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
+    #define SAMPLE_RATE         48000
+    #define SAMPLE_DEPTH        16
+    #define CHANNELS            2
+    #define SAMPLE_BYTES        ((SAMPLE_DEPTH / 8) * CHANNELS)
+    #define BUFFER_LEN          (SAMPLE_RATE * SAMPLE_BYTES)       // 2 seconds
 
     // initialize
-    hr = CoCreateInstance(CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&graph));
-    if (hr < 0) printf("[Audio] %x - Failed to create graph\n", hr);
+    LPDIRECTSOUND direct_sound;
+    hr = DirectSoundCreate(0, &direct_sound, 0);
+    DEBUG_ERROR("Failed to init DirectSound\n");
 
-    hr = graph->QueryInterface(IID_PPV_ARGS(&control));
-    if (hr < 0) printf("[Audio] %x - Failed to query control\n", hr);
+    WAVEFORMATEX wave_fmt = {};
+    wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
+    wave_fmt.nChannels       = CHANNELS;
+    wave_fmt.nSamplesPerSec  = SAMPLE_RATE;
+    wave_fmt.wBitsPerSample  = SAMPLE_DEPTH;
+    wave_fmt.nBlockAlign     = CHANNELS*(SAMPLE_DEPTH / 8);
+    wave_fmt.nAvgBytesPerSec = SAMPLE_RATE * wave_fmt.nBlockAlign;
+    wave_fmt.cbSize          = 0;
 
-    hr = graph->QueryInterface(IID_PPV_ARGS(&event));
-    if (hr < 0) printf("[Audio] %x - Failed to query events\n", hr);
+    hr = direct_sound->SetCooperativeLevel(hwnd, DSSCL_PRIORITY);
+    DEBUG_ERROR("Failed to set CoopLevel\n");
 
-    //hr = event->SetNotifyWindow((OAHWND)hwnd, WM_GRAPH_EVENT, NULL);
-    //if (hr < 0) printf("[Audio] %x - Failed to setup events\n", hr);
+    {
+        DSBUFFERDESC buffer_desc = {};
+        buffer_desc.dwSize  = sizeof(buffer_desc);
+        buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
 
+        hr = direct_sound->CreateSoundBuffer(&buffer_desc, main_buffer, 0);
+        DEBUG_ERROR("Failed to create main buffer\n");
 
-    // load audio
-    const wchar_t audio_path[] = L"res/test.wav"; 
-    hr = graph->AddSourceFilter((LPCWSTR)&audio_path[0], NULL, &source);
-    if (hr < 0) printf("[Audio] %x - Failed to load source\n", hr);
-
-
-    // render
-    hr = graph->QueryInterface(IID_PPV_ARGS(&graph2));
-    if (hr < 0) printf("[Audio] %x - Failed to add graph2\n", hr);
-
-    hr = AddFilterByCLSID(graph, CLSID_DSoundRender, &audio_renderer, L"Audio Renderer");
-    if (hr < 0) printf("[Audio] %x - Failed to add sound renderer\n", hr);
-
-    hr = source->EnumPins(&enum_pins);
-    if (hr < 0) printf("[Audio] %x - Failed to enumerate pins\n", hr);
-
-    // Loop through all the pins
-    u8 got_one;
-    IPin *pin;
-    while (S_OK == enum_pins->Next(1, &pin, NULL))
-    {           
-        HRESULT hr2 = graph2->RenderEx(pin, AM_RENDEREX_RENDERTOEXISTINGRENDERERS, NULL);
-        pin->Release();
-        if (hr2 >= 0) got_one = 1;
+        hr = (*main_buffer)->SetFormat(&wave_fmt);
+        DEBUG_ERROR("Failed to set main format\n");
     }
 
-    SafeRelease(&enum_pins);
-    SafeRelease(&audio_renderer);
-    SafeRelease(&graph2);
+    {
+        DSBUFFERDESC buffer_desc = {};
+        buffer_desc.dwSize        = sizeof(buffer_desc);
+        buffer_desc.dwFlags       = 0;
+        buffer_desc.dwBufferBytes = BUFFER_LEN;
+        buffer_desc.lpwfxFormat   = &wave_fmt;
 
-
-    // play
-    hr = control->Run();
-    if (hr < 0) printf("[Audio] %x - Failed to play\n", hr);
-
-
-    // cleanup
-    SafeRelease(&graph);
-    SafeRelease(&control);
-    SafeRelease(&event);
-    SafeRelease(&source);
+        hr = direct_sound->CreateSoundBuffer(&buffer_desc, off_buffer, 0);
+        DEBUG_ERROR("Failed to create off buffer\n");
+    }
 }
 
 
@@ -1301,9 +1238,9 @@ void main() {
 
 
     // audio FIXME
-    // https://docs.microsoft.com/en-us/windows/win32/directshow/step-3--build-the-filter-graph
-    // Create the Filter Graph Manager.
-    sound_test(hwnd);
+    LPDIRECTSOUNDBUFFER main_buffer;
+    LPDIRECTSOUNDBUFFER off_buffer;
+    sound_test(hwnd, &main_buffer, &off_buffer);
 
     // mouse sync
     i8 mouse_target_x;
@@ -1349,6 +1286,10 @@ void main() {
 
     u16 board_iterations   = 0;
     u16 stagnation_counter = 0xFFFF; 
+
+
+    // FIXME
+    u32 sound_acc = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -1831,6 +1772,64 @@ void main() {
                 }
             }
         }
+
+        // audio FIXME
+        HRESULT hr;
+
+        u32 play_cursor  = NULL;
+        u32 write_cursor = NULL;
+        hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+        DEBUG_ERROR("Failed to get cursor positions\n");
+    
+        u32 write_bytes;
+        u32 lock_bytes = (sound_acc*SAMPLE_BYTES) % BUFFER_LEN;
+        if (lock_bytes == play_cursor) {
+            write_bytes = BUFFER_LEN;
+        }
+        else if (lock_bytes > play_cursor) {
+            write_bytes  = BUFFER_LEN - lock_bytes;
+            write_bytes += play_cursor;
+        } else {
+            write_bytes = play_cursor - lock_bytes;
+        }
+
+        #define VOL    1500
+        #define PERIOD 180
+        #define L      0
+        #define R      1
+
+        void* region_a       = nullptr;
+        void* region_b       = nullptr;
+        u32   region_a_bytes = NULL;
+        u32   region_b_bytes = NULL;
+        hr = off_buffer->Lock(lock_bytes, write_bytes, 
+                &region_a, (LPDWORD)&region_a_bytes, 
+                &region_b, (LPDWORD)&region_b_bytes,
+                NULL);
+        DEBUG_ERROR("Failed to lock\n");
+        if (SUCCEEDED(hr)) { 
+            i16* ra = (i16*)region_a;
+            for (u32 i = 0; i < (region_a_bytes/SAMPLE_BYTES); i++) {
+                i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
+                *(ra++) = val * L;
+                *(ra++) = val * R;
+            }
+
+            i16* rb = (i16*)region_b;
+            for (u32 i = 0; i < (region_b_bytes/SAMPLE_BYTES); i++) {
+                i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
+                *(rb++) = val * L;
+                *(rb++) = val * R;
+            }
+
+            hr = off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
+            DEBUG_ERROR("Failed to unlock\n");
+
+            hr = off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
+            DEBUG_ERROR("Failed to play\n");
+        }
+
+
 
         // render
         if (render_timer >= render_wait) {
