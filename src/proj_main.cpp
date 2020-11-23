@@ -3,12 +3,14 @@
 
 // third party
 #include "windows.h"
+#include "dshow.h"
 #undef near
 #undef far
 
-
+#define GLFW_EXPOSE_NATIVE_WIN32
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
+#include "GLFW/glfw3native.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -930,7 +932,123 @@ void generate_puzzle(u16* board) {
 #endif
 }
 
+template <class T> void SafeRelease(T **ppT)
+{
+    if (*ppT)
+    {
+        (*ppT)->Release();
+        *ppT = NULL;
+    }
+}
 
+HRESULT AddFilterByCLSID(
+    IGraphBuilder *pGraph,      // Pointer to the Filter Graph Manager.
+    REFGUID clsid,              // CLSID of the filter to create.
+    IBaseFilter **ppF,          // Receives a pointer to the filter.
+    LPCWSTR wszName             // A name for the filter (can be NULL).
+    )
+{
+    *ppF = 0;
+
+    IBaseFilter *pFilter = NULL;
+    
+    HRESULT hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, 
+        IID_PPV_ARGS(&pFilter));
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+
+    hr = pGraph->AddFilter(pFilter, wszName);
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+
+    *ppF = pFilter;
+    (*ppF)->AddRef();
+
+done:
+    SafeRelease(&pFilter);
+    return hr;
+}
+
+
+// FIXME: read this - https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/DirectShow/step-6--handle-graph-events.md
+// specifically, look at the case for WM_GRAPH_EVENT, a **custom** window event ...
+// => implies that we need to be doing the events for the window,
+//    perhaps time to ditch GLFW? lots of work though ...
+void sound_test(HWND hwnd) {
+    printf("[Audio] Beginning sound test\n");
+
+    IGraphBuilder* graph        = NULL;
+    IMediaControl* control      = NULL;
+    IMediaEventEx* event        = NULL;
+
+    IBaseFilter*   source         = NULL;
+    IFilterGraph2* graph2         = NULL;
+    IBaseFilter*   audio_renderer = NULL;
+    IEnumPins*     enum_pins      = NULL;
+
+    HRESULT hr = NULL;
+
+
+    // initialize
+    hr = CoCreateInstance(CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&graph));
+    if (hr < 0) printf("[Audio] %x - Failed to create graph\n", hr);
+
+    hr = graph->QueryInterface(IID_PPV_ARGS(&control));
+    if (hr < 0) printf("[Audio] %x - Failed to query control\n", hr);
+
+    hr = graph->QueryInterface(IID_PPV_ARGS(&event));
+    if (hr < 0) printf("[Audio] %x - Failed to query events\n", hr);
+
+    //hr = event->SetNotifyWindow((OAHWND)hwnd, WM_GRAPH_EVENT, NULL);
+    //if (hr < 0) printf("[Audio] %x - Failed to setup events\n", hr);
+
+
+    // load audio
+    const wchar_t audio_path[] = L"res/test.wav"; 
+    hr = graph->AddSourceFilter((LPCWSTR)&audio_path[0], NULL, &source);
+    if (hr < 0) printf("[Audio] %x - Failed to load source\n", hr);
+
+
+    // render
+    hr = graph->QueryInterface(IID_PPV_ARGS(&graph2));
+    if (hr < 0) printf("[Audio] %x - Failed to add graph2\n", hr);
+
+    hr = AddFilterByCLSID(graph, CLSID_DSoundRender, &audio_renderer, L"Audio Renderer");
+    if (hr < 0) printf("[Audio] %x - Failed to add sound renderer\n", hr);
+
+    hr = source->EnumPins(&enum_pins);
+    if (hr < 0) printf("[Audio] %x - Failed to enumerate pins\n", hr);
+
+    // Loop through all the pins
+    u8 got_one;
+    IPin *pin;
+    while (S_OK == enum_pins->Next(1, &pin, NULL))
+    {           
+        HRESULT hr2 = graph2->RenderEx(pin, AM_RENDEREX_RENDERTOEXISTINGRENDERERS, NULL);
+        pin->Release();
+        if (hr2 >= 0) got_one = 1;
+    }
+
+    SafeRelease(&enum_pins);
+    SafeRelease(&audio_renderer);
+    SafeRelease(&graph2);
+
+
+    // play
+    hr = control->Run();
+    if (hr < 0) printf("[Audio] %x - Failed to play\n", hr);
+
+
+    // cleanup
+    SafeRelease(&graph);
+    SafeRelease(&control);
+    SafeRelease(&event);
+    SafeRelease(&source);
+}
 
 
 
@@ -982,6 +1100,8 @@ void main() {
         fprintf(stderr, "Failed to initialize OpenGL loader!\n");
         exit(-1);
     } 
+
+    HWND hwnd = glfwGetWin32Window(window);
 
     // opengl settings
     glEnable(GL_BLEND);
@@ -1179,6 +1299,11 @@ void main() {
     identity(&scale_mouse);
 
 
+
+    // audio FIXME
+    // https://docs.microsoft.com/en-us/windows/win32/directshow/step-3--build-the-filter-graph
+    // Create the Filter Graph Manager.
+    sound_test(hwnd);
 
     // mouse sync
     i8 mouse_target_x;
