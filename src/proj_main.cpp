@@ -1,5 +1,6 @@
 // local
 #include "proj_types.h"
+#include "proj_sound.h"
 
 // third party
 #include "windows.h"
@@ -1242,6 +1243,15 @@ void main() {
     LPDIRECTSOUNDBUFFER off_buffer;
     sound_test(hwnd, &main_buffer, &off_buffer);
 
+    HANDLE audio_thread = CreateThread( 
+            NULL,                   // default security attributes
+            0,                      // use default stack size  
+            (LPTHREAD_START_ROUTINE) audio_loop, // thread function name
+            NULL,                   // argument to thread function 
+            0,                      // use default creation flags 
+            NULL);                  // returns the thread identifier
+
+
     // mouse sync
     i8 mouse_target_x;
     i8 mouse_target_y;
@@ -1773,61 +1783,61 @@ void main() {
             }
         }
 
-        // audio FIXME
-        HRESULT hr;
+        // // audio FIXME
+        // HRESULT hr;
 
-        u32 play_cursor  = NULL;
-        u32 write_cursor = NULL;
-        hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-        DEBUG_ERROR("Failed to get cursor positions\n");
+        // u32 play_cursor  = NULL;
+        // u32 write_cursor = NULL;
+        // hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+        // DEBUG_ERROR("Failed to get cursor positions\n");
     
-        u32 write_bytes;
-        u32 lock_bytes = (sound_acc*SAMPLE_BYTES) % BUFFER_LEN;
-        if (lock_bytes == play_cursor) {
-            write_bytes = BUFFER_LEN;
-        }
-        else if (lock_bytes > play_cursor) {
-            write_bytes  = BUFFER_LEN - lock_bytes;
-            write_bytes += play_cursor;
-        } else {
-            write_bytes = play_cursor - lock_bytes;
-        }
+        // u32 write_bytes;
+        // u32 lock_bytes = (sound_acc*SAMPLE_BYTES) % BUFFER_LEN;
+        // if (lock_bytes == play_cursor) {
+        //     write_bytes = BUFFER_LEN;
+        // }
+        // else if (lock_bytes > play_cursor) {
+        //     write_bytes  = BUFFER_LEN - lock_bytes;
+        //     write_bytes += play_cursor;
+        // } else {
+        //     write_bytes = play_cursor - lock_bytes;
+        // }
 
-        #define VOL    1500
-        #define PERIOD 180
-        #define L      0
-        #define R      1
+        // #define VOL    1500
+        // #define PERIOD 180
+        // #define L      0
+        // #define R      1
 
-        void* region_a       = nullptr;
-        void* region_b       = nullptr;
-        u32   region_a_bytes = NULL;
-        u32   region_b_bytes = NULL;
-        hr = off_buffer->Lock(lock_bytes, write_bytes, 
-                &region_a, (LPDWORD)&region_a_bytes, 
-                &region_b, (LPDWORD)&region_b_bytes,
-                NULL);
-        DEBUG_ERROR("Failed to lock\n");
-        if (SUCCEEDED(hr)) { 
-            i16* ra = (i16*)region_a;
-            for (u32 i = 0; i < (region_a_bytes/SAMPLE_BYTES); i++) {
-                i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
-                *(ra++) = val * L;
-                *(ra++) = val * R;
-            }
+        // void* region_a       = nullptr;
+        // void* region_b       = nullptr;
+        // u32   region_a_bytes = NULL;
+        // u32   region_b_bytes = NULL;
+        // hr = off_buffer->Lock(lock_bytes, write_bytes, 
+        //         &region_a, (LPDWORD)&region_a_bytes, 
+        //         &region_b, (LPDWORD)&region_b_bytes,
+        //         NULL);
+        // DEBUG_ERROR("Failed to lock\n");
+        // if (SUCCEEDED(hr)) { 
+        //     i16* ra = (i16*)region_a;
+        //     for (u32 i = 0; i < (region_a_bytes/SAMPLE_BYTES); i++) {
+        //         i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
+        //         *(ra++) = val * L;
+        //         *(ra++) = val * R;
+        //     }
 
-            i16* rb = (i16*)region_b;
-            for (u32 i = 0; i < (region_b_bytes/SAMPLE_BYTES); i++) {
-                i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
-                *(rb++) = val * L;
-                *(rb++) = val * R;
-            }
+        //     i16* rb = (i16*)region_b;
+        //     for (u32 i = 0; i < (region_b_bytes/SAMPLE_BYTES); i++) {
+        //         i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
+        //         *(rb++) = val * L;
+        //         *(rb++) = val * R;
+        //     }
 
-            hr = off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
-            DEBUG_ERROR("Failed to unlock\n");
+        //     hr = off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
+        //     DEBUG_ERROR("Failed to unlock\n");
 
-            hr = off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
-            DEBUG_ERROR("Failed to play\n");
-        }
+        //     hr = off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
+        //     DEBUG_ERROR("Failed to play\n");
+        // }
 
 
 

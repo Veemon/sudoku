@@ -28,7 +28,7 @@ void main() {
     float impulse_overdampen = cos(2*time_delta) * 0.19;
     float impulse1  = 1.0 - exp(1 +  4.0 * time_delta) * impulse_overdampen;
     float impulse2  = 1.0 - exp(1 + 16.0 * time_delta) * impulse_overdampen;
-    float impulse3  = 1.0 - exp(1 +  1.0 * time_delta) * impulse_overdampen;
+    float impulse3  = 1.0 - exp(1 +  1.2 * time_delta) * impulse_overdampen;
 
     float v1 = sin(time_delta * 0.55);
     float v2 = cos(time_delta * 0.55 * 2);
