@@ -935,64 +935,6 @@ void generate_puzzle(u16* board) {
 
 
 
-void sound_test(HWND hwnd, LPDIRECTSOUNDBUFFER* main_buffer, LPDIRECTSOUNDBUFFER* off_buffer) {
-    printf("[Audio] Beginning sound test\n");
-
-    HRESULT hr = NULL;
-
-    #define DEBUG_ERROR(x)      if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
-    #define SAMPLE_RATE         48000
-    #define SAMPLE_DEPTH        16
-    #define CHANNELS            2
-    #define SAMPLE_BYTES        ((SAMPLE_DEPTH / 8) * CHANNELS)
-    #define BUFFER_LEN          (SAMPLE_RATE * SAMPLE_BYTES)       // 2 seconds
-
-    // initialize
-    LPDIRECTSOUND direct_sound;
-    hr = DirectSoundCreate(0, &direct_sound, 0);
-    DEBUG_ERROR("Failed to init DirectSound\n");
-
-    WAVEFORMATEX wave_fmt = {};
-    wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
-    wave_fmt.nChannels       = CHANNELS;
-    wave_fmt.nSamplesPerSec  = SAMPLE_RATE;
-    wave_fmt.wBitsPerSample  = SAMPLE_DEPTH;
-    wave_fmt.nBlockAlign     = CHANNELS*(SAMPLE_DEPTH / 8);
-    wave_fmt.nAvgBytesPerSec = SAMPLE_RATE * wave_fmt.nBlockAlign;
-    wave_fmt.cbSize          = 0;
-
-    hr = direct_sound->SetCooperativeLevel(hwnd, DSSCL_PRIORITY);
-    DEBUG_ERROR("Failed to set CoopLevel\n");
-
-    {
-        DSBUFFERDESC buffer_desc = {};
-        buffer_desc.dwSize  = sizeof(buffer_desc);
-        buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
-
-        hr = direct_sound->CreateSoundBuffer(&buffer_desc, main_buffer, 0);
-        DEBUG_ERROR("Failed to create main buffer\n");
-
-        hr = (*main_buffer)->SetFormat(&wave_fmt);
-        DEBUG_ERROR("Failed to set main format\n");
-    }
-
-    {
-        DSBUFFERDESC buffer_desc = {};
-        buffer_desc.dwSize        = sizeof(buffer_desc);
-        buffer_desc.dwFlags       = 0;
-        buffer_desc.dwBufferBytes = BUFFER_LEN;
-        buffer_desc.lpwfxFormat   = &wave_fmt;
-
-        hr = direct_sound->CreateSoundBuffer(&buffer_desc, off_buffer, 0);
-        DEBUG_ERROR("Failed to create off buffer\n");
-    }
-}
-
-
-
-
-
-
 void main() {
     // Setup GLFW window
     glfwSetErrorCallback(glfw_error_callback);
@@ -1238,16 +1180,19 @@ void main() {
 
 
 
-    // audio FIXME
-    LPDIRECTSOUNDBUFFER main_buffer;
-    LPDIRECTSOUNDBUFFER off_buffer;
-    sound_test(hwnd, &main_buffer, &off_buffer);
+    // audio
+    u32   local_tail = 0;
+    Event local_queue[N_EVENTS] = {0};
+
+    ThreadArgs audio_args;
+    audio_args.hwnd  = hwnd;
+    audio_args.mutex = CreateMutex(NULL, FALSE, NULL);
 
     HANDLE audio_thread = CreateThread( 
             NULL,                   // default security attributes
             0,                      // use default stack size  
             (LPTHREAD_START_ROUTINE) audio_loop, // thread function name
-            NULL,                   // argument to thread function 
+            &audio_args,                   // argument to thread function - note: may not like u touching another threads stack
             0,                      // use default creation flags 
             NULL);                  // returns the thread identifier
 
@@ -1296,10 +1241,6 @@ void main() {
 
     u16 board_iterations   = 0;
     u16 stagnation_counter = 0xFFFF; 
-
-
-    // FIXME
-    u32 sound_acc = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -1663,6 +1604,17 @@ void main() {
                     }
                 }
 
+                // FIXME - audio debug event
+                if (!handled && KEY_UP(GLFW_KEY_V)) {
+                    Event e;
+                    e.id     = EVENT_TEST;
+                    e.volume = 0.5;
+                    e.angle  = 0.0;
+                    local_queue[local_tail] = e;
+                    local_tail = (local_tail+1) % N_EVENTS;
+                    printf("[Main] Created Event\n");
+                }
+
                 // recompile shaders
                 if (!handled && KEY_UP(GLFW_KEY_F5)) {
                     handled = 1;
@@ -1783,63 +1735,23 @@ void main() {
             }
         }
 
-        // // audio FIXME
-        // HRESULT hr;
-
-        // u32 play_cursor  = NULL;
-        // u32 write_cursor = NULL;
-        // hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-        // DEBUG_ERROR("Failed to get cursor positions\n");
-    
-        // u32 write_bytes;
-        // u32 lock_bytes = (sound_acc*SAMPLE_BYTES) % BUFFER_LEN;
-        // if (lock_bytes == play_cursor) {
-        //     write_bytes = BUFFER_LEN;
-        // }
-        // else if (lock_bytes > play_cursor) {
-        //     write_bytes  = BUFFER_LEN - lock_bytes;
-        //     write_bytes += play_cursor;
-        // } else {
-        //     write_bytes = play_cursor - lock_bytes;
-        // }
-
-        // #define VOL    1500
-        // #define PERIOD 180
-        // #define L      0
-        // #define R      1
-
-        // void* region_a       = nullptr;
-        // void* region_b       = nullptr;
-        // u32   region_a_bytes = NULL;
-        // u32   region_b_bytes = NULL;
-        // hr = off_buffer->Lock(lock_bytes, write_bytes, 
-        //         &region_a, (LPDWORD)&region_a_bytes, 
-        //         &region_b, (LPDWORD)&region_b_bytes,
-        //         NULL);
-        // DEBUG_ERROR("Failed to lock\n");
-        // if (SUCCEEDED(hr)) { 
-        //     i16* ra = (i16*)region_a;
-        //     for (u32 i = 0; i < (region_a_bytes/SAMPLE_BYTES); i++) {
-        //         i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
-        //         *(ra++) = val * L;
-        //         *(ra++) = val * R;
-        //     }
-
-        //     i16* rb = (i16*)region_b;
-        //     for (u32 i = 0; i < (region_b_bytes/SAMPLE_BYTES); i++) {
-        //         i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
-        //         *(rb++) = val * L;
-        //         *(rb++) = val * R;
-        //     }
-
-        //     hr = off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
-        //     DEBUG_ERROR("Failed to unlock\n");
-
-        //     hr = off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
-        //     DEBUG_ERROR("Failed to play\n");
-        // }
-
-
+        // update audio
+        // FIXME - we setup a queue that pushes to another queue,
+        //         what is the audio thread to do? does it store the queue to its own locals ...
+        //         how will invalidation work? ie the tail goes over limit? do we just swing to ring buffer then?
+        //         how are we gonna keep track of time?
+        if (local_tail > 0) {
+            u32 sig = WaitForSingleObject(audio_args.mutex,0);
+            if (sig == WAIT_OBJECT_0) {
+                printf("[Main] Pushing events - %u\n", local_tail);
+                for (u32 idx = 0; idx < local_tail; idx++) {
+                    audio_args.queue[audio_args.tail + idx] = local_queue[idx];
+                }
+                audio_args.tail += local_tail; // FIXME - this can, and will, go over
+                local_tail = 0;
+                ReleaseMutex(audio_args.mutex);
+            }
+        }
 
         // render
         if (render_timer >= render_wait) {

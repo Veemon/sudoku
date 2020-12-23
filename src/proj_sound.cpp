@@ -4,6 +4,7 @@
 // FIXME: remove on cleanup
 #include "stdio.h"
 
+
 i32 wav_to_sound(const char* filename, Sound* sound) {
     #define BIG_32(x)   ( (x[3]<<24) | (x[2]<<16) | (x[1]<<8) | (x[0]<<0) )
     #define BIG_16(x)   ( (x[1]<<8)  | (x[0]<<0) )
@@ -67,10 +68,59 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     #undef BIG_16
 }
 
-
-
-void audio_loop() {
+void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Audio\n");
+
+    LPDIRECTSOUNDBUFFER main_buffer;
+    LPDIRECTSOUNDBUFFER off_buffer;
+    HRESULT hr = NULL;
+
+    #define DEBUG_ERROR(x)      if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
+    #define SAMPLE_RATE         48000
+    #define SAMPLE_DEPTH        16
+    #define CHANNELS            2
+    #define SAMPLE_BYTES        ((SAMPLE_DEPTH / 8) * CHANNELS)
+    #define BUFFER_LEN          (SAMPLE_RATE * SAMPLE_BYTES)       // 2 seconds
+
+    // initialize
+    LPDIRECTSOUND direct_sound;
+    hr = DirectSoundCreate(0, &direct_sound, 0);
+    DEBUG_ERROR("Failed to init DirectSound\n");
+
+    WAVEFORMATEX wave_fmt = {};
+    wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
+    wave_fmt.nChannels       = CHANNELS;
+    wave_fmt.nSamplesPerSec  = SAMPLE_RATE;
+    wave_fmt.wBitsPerSample  = SAMPLE_DEPTH;
+    wave_fmt.nBlockAlign     = CHANNELS*(SAMPLE_DEPTH / 8);
+    wave_fmt.nAvgBytesPerSec = SAMPLE_RATE * wave_fmt.nBlockAlign;
+    wave_fmt.cbSize          = 0;
+
+    hr = direct_sound->SetCooperativeLevel(args->hwnd, DSSCL_PRIORITY);
+    DEBUG_ERROR("Failed to set CoopLevel\n");
+
+    {
+        DSBUFFERDESC buffer_desc = {};
+        buffer_desc.dwSize  = sizeof(buffer_desc);
+        buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+
+        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &main_buffer, 0);
+        DEBUG_ERROR("Failed to create main buffer\n");
+
+        hr = main_buffer->SetFormat(&wave_fmt);
+        DEBUG_ERROR("Failed to set main format\n");
+    }
+
+    {
+        DSBUFFERDESC buffer_desc = {};
+        buffer_desc.dwSize        = sizeof(buffer_desc);
+        buffer_desc.dwFlags       = 0;
+        buffer_desc.dwBufferBytes = BUFFER_LEN;
+        buffer_desc.lpwfxFormat   = &wave_fmt;
+
+        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &off_buffer, 0);
+        DEBUG_ERROR("Failed to create off buffer\n");
+    }
 
     printf("[Audio] Loading Sounds\n");
 
@@ -78,5 +128,97 @@ void audio_loop() {
     wav_to_sound("./res/test.wav", &sound);
     free(sound.data);
 
-    // TODO: launch another thread and simply have an event fire based on a keypress
+    hr = NULL;
+
+    // the following was used to play some digital signal
+    u32 sound_acc = 0;
+
+    // timing
+    f32 total_time = 0.0;
+    LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
+    QueryPerformanceFrequency(&cpu_freq);
+    delta_ms.QuadPart = 0;
+    f32 delta_s = 0.0;
+
+    while (1) {
+        QueryPerformanceCounter(&start_time);
+
+        u32 sig = WaitForSingleObject(args->mutex,0);
+        if (sig == WAIT_OBJECT_0) {
+            for (u32 idx = 0; idx < args->tail; idx++) {
+                if (args->queue[idx].id == EVENT_TEST) {
+                    printf("[Audio] Read Event - (%u)\n", idx);
+                }
+            }
+            args->tail = 0;
+            ReleaseMutex(args->mutex);
+        }
+
+        /*
+        u32 play_cursor  = NULL;
+        u32 write_cursor = NULL;
+        hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+        DEBUG_ERROR("Failed to get cursor positions\n");
+
+        u32 write_bytes;
+        u32 lock_bytes = (sound_acc*SAMPLE_BYTES) % BUFFER_LEN;
+        if (lock_bytes == play_cursor) {
+            write_bytes = BUFFER_LEN;
+        }
+        else if (lock_bytes > play_cursor) {
+            write_bytes  = BUFFER_LEN - lock_bytes;
+            write_bytes += play_cursor;
+        } else {
+            write_bytes = play_cursor - lock_bytes;
+        }
+
+        #define VOL    1500
+        #define PERIOD 180
+        #define L      0
+        #define R      1
+
+        void* region_a       = nullptr;
+        void* region_b       = nullptr;
+        u32   region_a_bytes = NULL;
+        u32   region_b_bytes = NULL;
+
+        hr = off_buffer->Lock(lock_bytes, write_bytes, 
+                &region_a, (LPDWORD)&region_a_bytes, 
+                &region_b, (LPDWORD)&region_b_bytes,
+                NULL);
+
+        DEBUG_ERROR("Failed to lock\n");
+
+        if (SUCCEEDED(hr)) { 
+            i16* ra = (i16*)region_a;
+            for (u32 i = 0; i < (region_a_bytes/SAMPLE_BYTES); i++) {
+                i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
+                *(ra++) = val * L;
+                *(ra++) = val * R;
+            }
+
+            i16* rb = (i16*)region_b;
+            for (u32 i = 0; i < (region_b_bytes/SAMPLE_BYTES); i++) {
+                i16 val = (sound_acc++ % PERIOD > (PERIOD/2)) ? -VOL : VOL;
+                *(rb++) = val * L;
+                *(rb++) = val * R;
+            }
+
+            hr = off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
+            DEBUG_ERROR("Failed to unlock\n");
+
+            hr = off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
+            DEBUG_ERROR("Failed to play\n");
+        }
+        */
+
+        // timing
+        QueryPerformanceCounter(&end_time);
+        delta_ms.QuadPart = end_time.QuadPart - start_time.QuadPart;
+        delta_ms.QuadPart *= 1000;
+        delta_ms.QuadPart /= cpu_freq.QuadPart;
+        delta_s = f32(delta_ms.QuadPart) / 1000.f;
+
+        total_time += delta_s;
+    }
 }
