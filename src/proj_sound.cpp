@@ -92,9 +92,16 @@ void ring_push(RingBuffer* rb, Event e) {
 
 /* 
 FIXME: If you run the application you will hear one second of audio, then one second of silence.
-Not only that but you will hear the sine tone at a different frequency. Thus, I suppose the problem
-- We fill the output buffer with 2 seconds of sine data in 1 second of output buffer.
-  The remaining second in the output buffer is then 0, so it sounds like a reversing truck.
+
+The sine wave file is made from:
+Frequency      422 Hz
+Amplitude       -2 dbFS (db [relative] to Full Scale)
+Duration         3 Seconds
+Sample Rate     48 KHz
+
+Measured frequencies:
+File            420 Hz
+Sudoku          420 Hz
 */
 
 void audio_loop(ThreadArgs* args) {
@@ -151,8 +158,14 @@ void audio_loop(ThreadArgs* args) {
 
     printf("[Audio] Loading Sounds\n");
 
-    Sound sound;
-    wav_to_sound("./res/test.wav", &sound);
+    Sound sound_sin;
+    wav_to_sound("./res/422hz_-2db_3s_48khz.wav", &sound_sin);
+
+    Sound sound_sweep;
+    wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav", &sound_sweep);
+
+    // FIXME
+    Sound sound = sound_sin;
 
     printf("[Audio] Beginning Polling\n");
 
@@ -164,8 +177,6 @@ void audio_loop(ThreadArgs* args) {
     Event  queued[N_EVENTS];
     u32    play_tail  = 0;
     u32    queue_tail = 0;
-
-    u32 sound_acc = 0; // the following was used to play some digital signal
 
     // timing
     f32 total_time = 0.0;
@@ -218,6 +229,8 @@ void audio_loop(ThreadArgs* args) {
         */
 
         // FIXME - debug sound loop
+        // on this topic, what if we made this a part of the event? for example a "looping" flag
+        // if something is looping then we also need to emit an event to stop the looping ... 
         if (total_time > playing[0].end_time) {
             playing[0].start_time  = total_time;
             playing[0].end_time   += total_time;
@@ -225,11 +238,14 @@ void audio_loop(ThreadArgs* args) {
         }
 
         // Playing Sounds -> Layers
-        printf("[Audio] Writing to Layers\n");
         {
             // FIXME - offset should be calculted based on the elapsed time
+            // could do this with a file thats a 3 second long sine wave, each second a different frequency.
+            // will fill the whole buffer then 3 times etc.
             u32 offset = 0;
             for (u32 idx = 0; idx < MASTER_LEN; idx++) {
+
+                // FIXME: not taking into account sound data at all lmao
                 // sound data is:
                 // - range of [-2^(depth-1), 2^(depth-1)]
                 // - interleaved (channels)
@@ -243,20 +259,36 @@ void audio_loop(ThreadArgs* args) {
                     continue;
                 }
 
-                if (sound.depth == 8) {
-                    i8* interp = (i8*) sound.data;
-                    layers[0][0][idx] = f32(interp[(2*i)])   / 128;
-                    layers[0][1][idx] = f32(interp[(2*i)+1]) / 128;
-                } else if (sound.depth == 16) {
-                    i16* interp = (i16*) sound.data;
-                    layers[0][0][idx] = f32(interp[(2*i)])   / 32768;
-                    layers[0][1][idx] = f32(interp[(2*i)+1]) / 32768;
+                // FIXME - this obviously needs a cleanup
+                if (sound.channels == 1) {
+                    if (sound.depth == 16) {
+                        i16* interp = (i16*) sound.data;
+                        layers[0][0][idx] = f32(interp[i]) / 32768;
+                        layers[0][1][idx] = f32(interp[i]) / 32768;
+                        continue;
+                    }
                 }
+
+                if (sound.channels == 2) {
+                    if (sound.depth == 8) {
+                        i8* interp = (i8*) sound.data;
+                        layers[0][0][idx] = f32(interp[(2*i)])   / 128;
+                        layers[0][1][idx] = f32(interp[(2*i)+1]) / 128;
+                        continue;
+                    } 
+                    
+                    if (sound.depth == 16) {
+                        i16* interp = (i16*) sound.data;
+                        layers[0][0][idx] = f32(interp[(2*i)])   / 32768;
+                        layers[0][1][idx] = f32(interp[(2*i)+1]) / 32768;
+                        continue;
+                    }
+                }
+
             }
         }
 
         // Mixing Layers -> Master
-        printf("[Audio] Mixing Layers\n");
         {
             // accumulate sounds from all layers
             for (u32 layer_idx = 0; layer_idx < N_LAYERS; layer_idx++) {
@@ -270,15 +302,16 @@ void audio_loop(ThreadArgs* args) {
         }
 
         // Master -> Output
-        printf("[Audio] Outputting Master\n");
         {
             u32 play_cursor  = NULL;
             u32 write_cursor = NULL;
             hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
             DEBUG_ERROR("Failed to get cursor positions\n");
-
+    
+            // FIXME - I assume the timing issue resides in here,
+            // for afterall, what in gods name are the write and lock bytes.
             u32 write_bytes;
-            u32 lock_bytes = (sound_acc*OUTPUT_SAMPLE_BYTES) % OUTPUT_LEN;
+            u32 lock_bytes = OUTPUT_SAMPLE_BYTES;
             if (lock_bytes == play_cursor) {
                 write_bytes = OUTPUT_LEN;
             }
@@ -302,8 +335,8 @@ void audio_loop(ThreadArgs* args) {
             DEBUG_ERROR("Failed to lock\n");
 
             if (SUCCEEDED(hr)) { 
-                u32 a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
-                i16* ra      = (i16*)region_a;
+                u32  a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
+                i16* ra       = (i16*)region_a;
                 for (u32 i = 0; i < a_offset; i++) {
                     // set output
                     *(ra++) = i16(master[0][i] * 32768);
@@ -314,8 +347,8 @@ void audio_loop(ThreadArgs* args) {
                     master[1][i] = 0.0;
                 }
 
-                u32 b_offset = region_b_bytes / OUTPUT_SAMPLE_BYTES;
-                i16* rb      = (i16*)region_b;
+                u32  b_offset = region_b_bytes / OUTPUT_SAMPLE_BYTES;
+                i16* rb       = (i16*)region_b;
                 for (u32 i = 0; i < b_offset; i++) {
                     // set output
                     *(rb++) = i16(master[0][i+a_offset] * 32768);
