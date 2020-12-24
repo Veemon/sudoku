@@ -20,12 +20,25 @@ struct Event {
     f32 angle;
 };
 
+struct Status {
+    f32 start_time;
+    f32 end_time;
+    const Event respond; // event taken from ring
+    Event current;       // current status of the event
+};
+
 #define N_EVENTS 256
+struct RingBuffer {
+    u32   ptr            = 0;
+    Event ring[N_EVENTS] = {0};
+};
+
+void ring_push(RingBuffer* rb, Event e);
+
 struct ThreadArgs {
-    u32 tail              = 0;
-    HANDLE mutex          = NULL;
-    HWND hwnd             = NULL;
-    Event queue[N_EVENTS] = {0};
+    HWND       hwnd  = NULL;
+    HANDLE     mutex = NULL;
+    RingBuffer events;
 };
 
 void audio_loop(ThreadArgs* args);

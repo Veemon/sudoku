@@ -1160,8 +1160,6 @@ void main() {
     GLuint u_time_mouse  = glGetUniformLocation(shader_program_mouse, "time");
 
 
-
-
     // orthogonal projection and scale matrice
     glBindVertexArray(vao);
 
@@ -1179,34 +1177,6 @@ void main() {
     identity(&scale_mouse);
 
 
-
-    // audio
-    u32   local_tail = 0;
-    Event local_queue[N_EVENTS] = {0};
-
-    ThreadArgs audio_args;
-    audio_args.hwnd  = hwnd;
-    audio_args.mutex = CreateMutex(NULL, FALSE, NULL);
-
-    HANDLE audio_thread = CreateThread( 
-            NULL,                   // default security attributes
-            0,                      // use default stack size  
-            (LPTHREAD_START_ROUTINE) audio_loop, // thread function name
-            &audio_args,                   // argument to thread function - note: may not like u touching another threads stack
-            0,                      // use default creation flags 
-            NULL);                  // returns the thread identifier
-
-
-    // mouse sync
-    i8 mouse_target_x;
-    i8 mouse_target_y;
-    u8 hover_idx = 0xFF;
-
-    f32 x_ratio = 1.0f, y_ratio = 1.0f;
-    f32 adx     = 0.0f, ady     = 0.0f;
-
-
-
     // timing
     f32 total_time = 0.0;
     LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
@@ -1220,6 +1190,34 @@ void main() {
 
     f32 render_wait  = 1.0 / f32(monitor_rate);
     f32 render_timer = render_wait;
+
+
+    // audio
+    ThreadArgs audio_args;
+    audio_args.hwnd  = hwnd;
+    audio_args.mutex = CreateMutex(NULL, FALSE, NULL);
+
+    RingBuffer  local_event_data;
+    RingBuffer* local_events = &local_event_data;
+    RingBuffer* audio_events = &audio_args.events;
+
+    HANDLE audio_thread = CreateThread( 
+            NULL,                   // default security attributes
+            0,                      // use default stack size  
+            (LPTHREAD_START_ROUTINE) audio_loop, // thread function name
+            &audio_args,                   // argument to thread function - note: may not like u touching another threads stack
+            0,                      // use default creation flags 
+            NULL);                  // returns the thread identifier
+
+
+
+    // mouse sync
+    i8 mouse_target_x;
+    i8 mouse_target_y;
+    u8 hover_idx = 0xFF;
+
+    f32 x_ratio = 1.0f, y_ratio = 1.0f;
+    f32 adx     = 0.0f, ady     = 0.0f;
 
 
     // game
@@ -1606,12 +1604,7 @@ void main() {
 
                 // FIXME - audio debug event
                 if (!handled && KEY_UP(GLFW_KEY_V)) {
-                    Event e;
-                    e.id     = EVENT_TEST;
-                    e.volume = 0.5;
-                    e.angle  = 0.0;
-                    local_queue[local_tail] = e;
-                    local_tail = (local_tail+1) % N_EVENTS;
+                    ring_push(local_events, {EVENT_TEST, 0.5, 0.0});
                     printf("[Main] Created Event\n");
                 }
 
@@ -1735,21 +1728,18 @@ void main() {
             }
         }
 
-        // update audio
-        // FIXME - we setup a queue that pushes to another queue,
-        //         what is the audio thread to do? does it store the queue to its own locals ...
-        //         how will invalidation work? ie the tail goes over limit? do we just swing to ring buffer then?
-        //         how are we gonna keep track of time?
-        if (local_tail > 0) {
+        // update audio - FIXME
+        if (local_events->ptr > 0 || local_events->ring[N_EVENTS-1].id != EVENT_DEFAULT) {
             u32 sig = WaitForSingleObject(audio_args.mutex,0);
             if (sig == WAIT_OBJECT_0) {
-                printf("[Main] Pushing events - %u\n", local_tail);
-                for (u32 idx = 0; idx < local_tail; idx++) {
-                    audio_args.queue[audio_args.tail + idx] = local_queue[idx];
-                }
-                audio_args.tail += local_tail; // FIXME - this can, and will, go over
-                local_tail = 0;
+                printf("[Main] Copying Event Ring\n");
+
+                memcpy(audio_events, local_events, sizeof(RingBuffer));
                 ReleaseMutex(audio_args.mutex);
+
+                memset(local_events, 0, sizeof(RingBuffer));
+                // FIXME - so we clear it here, but what if the audio thread doesn't
+                //         get to it in time, so then we lose a buffer of events zzz
             }
         }
 

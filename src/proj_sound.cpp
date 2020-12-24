@@ -68,6 +68,13 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     #undef BIG_16
 }
 
+
+void ring_push(RingBuffer* rb, Event e) {
+    rb->ring[rb->ptr] = e;
+    rb->ptr = (rb->ptr+1) % N_EVENTS;
+}
+
+
 void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Audio\n");
 
@@ -75,6 +82,7 @@ void audio_loop(ThreadArgs* args) {
     LPDIRECTSOUNDBUFFER off_buffer;
     HRESULT hr = NULL;
 
+    // FIXME - could this be better?
     #define DEBUG_ERROR(x)      if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
     #define SAMPLE_RATE         48000
     #define SAMPLE_DEPTH        16
@@ -128,10 +136,18 @@ void audio_loop(ThreadArgs* args) {
     wav_to_sound("./res/test.wav", &sound);
     free(sound.data);
 
+    printf("[Audio] Beginning Polling\n");
+
     hr = NULL;
 
-    // the following was used to play some digital signal
-    u32 sound_acc = 0;
+    // ring buffers are nice because the structure implies invalidation of old events
+    RingBuffer* events = &(args->events);
+    Status playing[N_EVENTS];
+    Event  queued[N_EVENTS];
+    u32    play_tail  = 0;
+    u32    queue_tail = 0;
+
+    u32 sound_acc = 0; // the following was used to play some digital signal
 
     // timing
     f32 total_time = 0.0;
@@ -143,16 +159,28 @@ void audio_loop(ThreadArgs* args) {
     while (1) {
         QueryPerformanceCounter(&start_time);
 
+        // queue sounds in response to events from the main thread
         u32 sig = WaitForSingleObject(args->mutex,0);
         if (sig == WAIT_OBJECT_0) {
-            for (u32 idx = 0; idx < args->tail; idx++) {
-                if (args->queue[idx].id == EVENT_TEST) {
-                    printf("[Audio] Read Event - (%u)\n", idx);
+            const u32 a[2] = {events->ptr, 0};
+            const u32 b[2] = {N_EVENTS, events->ptr};
+            for (u8 out = 0; out < 2; out++) {
+                for (u32 idx = a[out]; idx < b[out]; idx++) {
+                    if (events->ring[idx].id == EVENT_DEFAULT) continue;
+                    queued[queue_tail] = events->ring[idx];
+                    queue_tail = (queue_tail+1) % N_EVENTS; // FIXME - if we actually overflow, we don't want this
+                    printf("[Audio] Queued event - %u\n", events->ring[idx].id);
                 }
             }
-            args->tail = 0;
             ReleaseMutex(args->mutex);
         }
+
+        // FIXME - something isnt getting cleared here
+        if (queue_tail > 0) {
+            printf("[Audio] Sound Queue Length - %u\n", queue_tail);
+        }
+
+        // convert queued sounds to playing sounds?
 
         /*
         u32 play_cursor  = NULL;
@@ -211,6 +239,10 @@ void audio_loop(ThreadArgs* args) {
             DEBUG_ERROR("Failed to play\n");
         }
         */
+
+        // FIXME - if we play sound at 44KHz, and this thread is running > 1GHz,
+        //         there is only so much processing we can do before we should really be just going to sleep.
+        //         that way we're also not hogging the event mutex 
 
         // timing
         QueryPerformanceCounter(&end_time);
