@@ -76,18 +76,26 @@ void ring_push(RingBuffer* rb, Event e) {
 
 
 // FIXME - could this be better?
-#define DEBUG_ERROR(x)      if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
-#define SAMPLE_RATE         48000
-#define SAMPLE_DEPTH        16
-#define CHANNELS            2
-#define SAMPLE_BYTES        ((SAMPLE_DEPTH / 8) * CHANNELS)
-#define BUFFER_LEN          (SAMPLE_RATE * SAMPLE_BYTES)       // 1 seconds
+#define DEBUG_ERROR(x)          if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
 
-#define N_LAYERS            1
-#define LAYER_CHANNELS      2
+#define OUTPUT_SAMPLE_RATE      48000
+#define OUTPUT_SAMPLE_DEPTH     16
+#define OUTPUT_CHANNELS         2
+#define OUTPUT_SAMPLE_BYTES     ((OUTPUT_SAMPLE_DEPTH / 8) * OUTPUT_CHANNELS)
+#define OUTPUT_LEN              (OUTPUT_SAMPLE_RATE * OUTPUT_SAMPLE_BYTES)       // 1 seconds
+                                
+#define N_LAYERS                1
+#define LAYER_CHANNELS          2
+                                
+#define MASTER_CHANNELS         2
+#define MASTER_LEN              OUTPUT_SAMPLE_RATE // 1 second
 
-#define MASTER_CHANNELS     2
-#define MASTER_LEN          SAMPLE_RATE // 1 second
+/* 
+FIXME: If you run the application you will hear one second of audio, then one second of silence.
+Not only that but you will hear the sine tone at a different frequency. Thus, I suppose the problem
+- We fill the output buffer with 2 seconds of sine data in 1 second of output buffer.
+  The remaining second in the output buffer is then 0, so it sounds like a reversing truck.
+*/
 
 void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Audio\n");
@@ -107,11 +115,11 @@ void audio_loop(ThreadArgs* args) {
 
     WAVEFORMATEX wave_fmt = {};
     wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
-    wave_fmt.nChannels       = CHANNELS;
-    wave_fmt.nSamplesPerSec  = SAMPLE_RATE;
-    wave_fmt.wBitsPerSample  = SAMPLE_DEPTH;
-    wave_fmt.nBlockAlign     = CHANNELS*(SAMPLE_DEPTH / 8);
-    wave_fmt.nAvgBytesPerSec = SAMPLE_RATE * wave_fmt.nBlockAlign;
+    wave_fmt.nChannels       = OUTPUT_CHANNELS;
+    wave_fmt.nSamplesPerSec  = OUTPUT_SAMPLE_RATE;
+    wave_fmt.wBitsPerSample  = OUTPUT_SAMPLE_DEPTH;
+    wave_fmt.nBlockAlign     = OUTPUT_CHANNELS*(OUTPUT_SAMPLE_DEPTH / 8);
+    wave_fmt.nAvgBytesPerSec = OUTPUT_SAMPLE_RATE * wave_fmt.nBlockAlign;
     wave_fmt.cbSize          = 0;
 
     hr = direct_sound->SetCooperativeLevel(args->hwnd, DSSCL_PRIORITY);
@@ -133,7 +141,7 @@ void audio_loop(ThreadArgs* args) {
         DSBUFFERDESC buffer_desc = {};
         buffer_desc.dwSize        = sizeof(buffer_desc);
         buffer_desc.dwFlags       = 0;
-        buffer_desc.dwBufferBytes = BUFFER_LEN;
+        buffer_desc.dwBufferBytes = OUTPUT_LEN;
         buffer_desc.lpwfxFormat   = &wave_fmt;
 
         hr = direct_sound->CreateSoundBuffer(&buffer_desc, &off_buffer, 0);
@@ -203,16 +211,16 @@ void audio_loop(ThreadArgs* args) {
            Workflow
            ----------------------------
            Respond to Events
-           Update Playing Sounds
+           Update Playing Sounds (need to do something from the queue)
            Write to Layer                   -  Layers have n channels
-           Mix Layers to Master             -  Master has  m channels
+           Mix Layers to Master             -  Master has  n channels
            Write Master to Output           -  Output is the flat DirectSound buffer
         */
 
         // FIXME - debug sound loop
-        if (total_time > playing[0].end_time + 1.0) {
+        if (total_time > playing[0].end_time) {
             playing[0].start_time  = total_time;
-            playing[0].end_time   += total_time + 1.0;
+            playing[0].end_time   += total_time;
             playing[0].current     = playing[0].respond;
         }
 
@@ -264,20 +272,18 @@ void audio_loop(ThreadArgs* args) {
         // Master -> Output
         printf("[Audio] Outputting Master\n");
         {
-            // TODO: clear master on the way out
-
             u32 play_cursor  = NULL;
             u32 write_cursor = NULL;
             hr = off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
             DEBUG_ERROR("Failed to get cursor positions\n");
 
             u32 write_bytes;
-            u32 lock_bytes = (sound_acc*SAMPLE_BYTES) % BUFFER_LEN;
+            u32 lock_bytes = (sound_acc*OUTPUT_SAMPLE_BYTES) % OUTPUT_LEN;
             if (lock_bytes == play_cursor) {
-                write_bytes = BUFFER_LEN;
+                write_bytes = OUTPUT_LEN;
             }
             else if (lock_bytes > play_cursor) {
-                write_bytes  = BUFFER_LEN - lock_bytes;
+                write_bytes  = OUTPUT_LEN - lock_bytes;
                 write_bytes += play_cursor;
             } else {
                 write_bytes = play_cursor - lock_bytes;
@@ -296,14 +302,28 @@ void audio_loop(ThreadArgs* args) {
             DEBUG_ERROR("Failed to lock\n");
 
             if (SUCCEEDED(hr)) { 
-                i16* ra = (i16*)region_a;
-                for (u32 i = 0; i < (region_a_bytes/SAMPLE_BYTES); i++) {
-                    ra++;
+                u32 a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
+                i16* ra      = (i16*)region_a;
+                for (u32 i = 0; i < a_offset; i++) {
+                    // set output
+                    *(ra++) = i16(master[0][i] * 32768);
+                    *(ra++) = i16(master[1][i] * 32768);
+
+                    // clear master
+                    master[0][i] = 0.0;
+                    master[1][i] = 0.0;
                 }
 
-                i16* rb = (i16*)region_b;
-                for (u32 i = 0; i < (region_b_bytes/SAMPLE_BYTES); i++) {
-                    rb++;
+                u32 b_offset = region_b_bytes / OUTPUT_SAMPLE_BYTES;
+                i16* rb      = (i16*)region_b;
+                for (u32 i = 0; i < b_offset; i++) {
+                    // set output
+                    *(rb++) = i16(master[0][i+a_offset] * 32768);
+                    *(rb++) = i16(master[1][i+a_offset] * 32768);
+
+                    // clear master
+                    master[0][i+a_offset] = 0.0;
+                    master[1][i+a_offset] = 0.0;
                 }
 
                 hr = off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
