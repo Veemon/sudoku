@@ -17,14 +17,15 @@ i32 wav_to_sound(const char* filename, Sound* sound);
 struct Event {
     u16 id;
     f32 volume;
-    f32 angle;
+    f32 angle;    // TODO: imagine 5 channel audio all coming from the left
 };
 
 struct Status {
-    f32 start_time;
-    f32 end_time;
-    const Event respond; // event taken from ring
-    Event current;       // current status of the event
+    f32   start_time;
+    f32   end_time;
+    u8    layer;
+    Event respond; // event taken from ring
+    Event current; // current status of the event
 };
 
 #define N_EVENTS 256
