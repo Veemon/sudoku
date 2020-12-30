@@ -2,10 +2,11 @@
 #include "dsound.h"
 
 struct Sound {
-    u32   data_length;
+    u32   length;
     u16   sample_rate;
     u8    depth;
     u8    channels;
+    u32   byte_length;
     void* data;
 };
 
