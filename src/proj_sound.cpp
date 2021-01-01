@@ -150,12 +150,8 @@ void ring_push(RingBuffer* rb, Event e) {
 
 // -- Audio Pipeline functions
 
-void sound_to_layer(Sound* sound, u16 layer, u32 offset) {
-    // FIXME - offset should be calculted based on the elapsed time
-    // could do this with a file thats a 3 second long sine wave, each second a different frequency.
-    // will fill the whole buffer then 3 times etc.
+void sound_to_layer(Sound* sound, u16 layer, i64 offset) {
     for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
-
         // FIXME: not taking into account sound data at all lmao
         // sound data is:
         // - range of [-2^(depth-1), 2^(depth-1)]
@@ -163,7 +159,7 @@ void sound_to_layer(Sound* sound, u16 layer, u32 offset) {
         // - variable depth
 
         // if out of sound samples just play 0
-        u32 sample_idx = offset + idx;
+        i64 sample_idx = offset + idx;
         if (sample_idx > sound->length - 1) {
             buffers.layers[layer][0][idx] = 0.0;
             buffers.layers[layer][1][idx] = 0.0;
@@ -264,11 +260,16 @@ void init_directsound(HWND hwnd) {
 }
 
 
-void output_buffer(u32 play_cursor, u32 write_cursor) {
+void output_buffer() {
     void* region_a       = nullptr;
     void* region_b       = nullptr;
     u32   region_a_bytes = NULL;
     u32   region_b_bytes = NULL;
+
+    u32 play_cursor  = NULL;
+    u32 write_cursor = NULL;
+    HRESULT hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+    DEBUG_ERROR("Failed to get cursor positions\n");
 
     // write_bytes are the byte size of the locked region
     u32 write_bytes = 0;
@@ -281,9 +282,6 @@ void output_buffer(u32 play_cursor, u32 write_cursor) {
         write_bytes = play_cursor - write_cursor; // go to the play cursor
     }
 
-    printf("  writing  %u", write_bytes);
-
-    HRESULT hr = NULL;
     hr = buffers.off_buffer->Lock(write_cursor, write_bytes, 
             &region_a, (LPDWORD)&region_a_bytes, 
             &region_b, (LPDWORD)&region_b_bytes,
@@ -316,8 +314,6 @@ void output_buffer(u32 play_cursor, u32 write_cursor) {
             buffers.master[1][i+a_offset] = 0.0;
         }
 
-        // printf("[Audio] Regions -  A: %u    B: %u\n", a_offset, b_offset);
-
         hr = buffers.off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
         DEBUG_ERROR("Failed to unlock\n");
 
@@ -349,9 +345,6 @@ void audio_loop(ThreadArgs* args) {
     // loop locals
     RingBuffer* events = &(args->events);
     Status active_sounds[N_SOUNDS];
-
-    f32 last_write = 0.0;
-    u32 offset = 0;
 
 
     printf("[Audio] Beginning Polling\n");
@@ -395,21 +388,12 @@ void audio_loop(ThreadArgs* args) {
             #undef iter
         }
 
-
-        // NOTE: Data should not be written to the part of the buffer after the play cursor and before the write cursor
-#if 0
-        u32 play_cursor  = NULL;
-        u32 write_cursor = NULL;
-        hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-        DEBUG_ERROR("Failed to get cursor positions\n");
-
-        offset = 
-
-        if ((total_time - last_write) + 1e-8 >= w) {
-            sound_to_layer(&sounds.sin, 0, offset);
-            mix_to_master();
-            output_buffer(play_cursor, write_cursor);
-        }
+#if 1
+        // FIXME -- sound is very, very quick!
+        i64 offset = (total_time_ms - active_sounds[0].start_time_ms) * sounds[0].sample_rate;
+        sound_to_layer(&sounds[0], 0, offset);
+        mix_to_master();
+        output_buffer();
 #endif
 
         // timing
