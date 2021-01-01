@@ -10,7 +10,7 @@ set i=/I %l%
 
 
 set GLAD_SOURCE=%l%glad\src\glad.c
-set SOURCE=%s%proj_main.cpp %s%proj_sound.cpp %GLAD_SOURCE%
+set SOURCE=%s%proj_main.cpp %s%proj_sound.cpp %s%proj_math.cpp %GLAD_SOURCE%
 set INCLUDES=%i%glfw_33_x64\include\ %i%glad\include\ %i%stb\ 
 
 set LIBRARIES=kernel32.lib gdi32.lib shell32.lib msvcrt.lib libcmt.lib user32.lib Comdlg32.lib opengl32.lib dsound.lib %l%glfw_33_x64\lib-vc2019\glfw3.lib %l%glfw_33_x64\lib-vc2019\glfw3dll.lib 

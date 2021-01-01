@@ -1,36 +1,15 @@
-#include "proj_types.h"
 #include "proj_sound.h"
 
-// FIXME: remove on cleanup
-#include "stdio.h"
 
-// FIXME: maybe make a math file?
-#include "float.h"
-#include "math.h"
-#define TAU  6.28318530717958647693
+SoundLibrary sounds;
+AudioBuffers buffers;
 
-const f32 pow_10[] = {
-    1,
-    10,
-    100,
-    1000,
-    10000,
-    100000,
-    1000000,
-    10000000,
-    100000000,
-    1000000000,
-    10000000000
-};
 
-f32 abs(f32 x) {
-    if (x > 1e-8) return x;
-    return x * -1.0f;
-}
+// -- Sound Utils
 
 void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
     // grab range of data
-    f32 min = FLT_MAX;
+    f32 min = F32_MAX;
     f32 max = 0.0f;
     for (u32 i = 0; i < length; i++) {
         if (data[i] > max) max = data[i];
@@ -89,6 +68,7 @@ void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
 
     free(desc);
 }
+
 
 i32 wav_to_sound(const char* filename, Sound* sound) {
     #define BIG_32(x)   ( (x[3]<<24) | (x[2]<<16) | (x[1]<<8) | (x[0]<<0) )
@@ -157,6 +137,7 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     #undef BIG_16
 }
 
+// -- RingBuffer Utils
 
 void ring_push(RingBuffer* rb, Event e) {
     rb->ring[rb->ptr] = e;
@@ -164,31 +145,7 @@ void ring_push(RingBuffer* rb, Event e) {
 }
 
 
-// FIXME - could this be better?
-#define DEBUG_ERROR(x)          if (hr < 0) { printf("[Audio] 0x%x - " x, hr); }
-
-#define OUTPUT_SAMPLE_RATE      48000
-#define OUTPUT_DEPTH            16
-#define OUTPUT_CHANNELS         2
-#define OUTPUT_SAMPLE_BYTES     ((OUTPUT_DEPTH >> 3) * OUTPUT_CHANNELS)
-                                
-#define N_LAYERS                1
-#define LAYER_CHANNELS          2
-#define MASTER_CHANNELS         2
-
-#define BUFFER_LEN              OUTPUT_SAMPLE_RATE // 1 second
-
-struct AudioBuffers {
-    f32 layers[N_LAYERS][LAYER_CHANNELS][BUFFER_LEN] = {0.0f};
-    f32 master[MASTER_CHANNELS][BUFFER_LEN]          = {0.0f};
-    LPDIRECTSOUNDBUFFER main_buffer;
-    LPDIRECTSOUNDBUFFER off_buffer;
-} buffers;
-
-struct SoundLibrary {
-    Sound sin;
-    Sound sweep;
-} sounds;
+// -- Audio Pipeline functions
 
 void sound_to_layer(Sound* sound, u16 layer, u32 offset) {
     // FIXME - offset should be calculted based on the elapsed time
@@ -249,6 +206,60 @@ void mix_to_master() {
     
     // TODO: this is where we would normalize, or something
 }
+
+
+// -- Platform Specifics
+
+void init_directsound(HWND hwnd) {
+    HRESULT hr = NULL;
+
+    // initialize
+    LPDIRECTSOUND direct_sound;
+
+    hr = DirectSoundCreate(0, &direct_sound, 0);
+    DEBUG_ERROR("Failed to init DirectSound\n");
+
+    hr = direct_sound->SetCooperativeLevel(hwnd, DSSCL_PRIORITY);
+    DEBUG_ERROR("Failed to set CoopLevel\n");
+
+    WAVEFORMATEX wave_fmt = {};
+    wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
+    wave_fmt.nChannels       = OUTPUT_CHANNELS;
+    wave_fmt.nSamplesPerSec  = OUTPUT_SAMPLE_RATE;
+    wave_fmt.wBitsPerSample  = OUTPUT_DEPTH;
+    wave_fmt.nBlockAlign     = OUTPUT_SAMPLE_BYTES;
+    wave_fmt.nAvgBytesPerSec = OUTPUT_SAMPLE_RATE * OUTPUT_SAMPLE_BYTES;
+    wave_fmt.cbSize          = 0;
+
+    printf("  -  format        %u\n", wave_fmt.wFormatTag);
+    printf("  -  channels      %u\n", wave_fmt.nChannels);
+    printf("  -  sample rate   %u\n", wave_fmt.nSamplesPerSec);
+    printf("  -  depth         %u\n", wave_fmt.wBitsPerSample);
+
+    {
+        DSBUFFERDESC buffer_desc = {};
+        buffer_desc.dwSize  = sizeof(buffer_desc);
+        buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+
+        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.main_buffer, 0);
+        DEBUG_ERROR("Failed to create main buffer\n");
+
+        hr = buffers.main_buffer->SetFormat(&wave_fmt);
+        DEBUG_ERROR("Failed to set main format\n");
+    }
+
+    {
+        DSBUFFERDESC buffer_desc = {};
+        buffer_desc.dwSize        = sizeof(buffer_desc);
+        buffer_desc.dwFlags       = DSBCAPS_GLOBALFOCUS;
+        buffer_desc.dwBufferBytes = BUFFER_LEN;
+        buffer_desc.lpwfxFormat   = &wave_fmt;
+
+        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.off_buffer, 0);
+        DEBUG_ERROR("Failed to create off buffer\n");
+    }
+}
+
 
 void output_buffer(u32 play_cursor, u32 write_cursor) {
     void* region_a       = nullptr;
@@ -313,103 +324,15 @@ void output_buffer(u32 play_cursor, u32 write_cursor) {
 }
 
 
-/* 
-FIXME: If you run the application you will hear one second of audio, then one second of silence.
 
-The sine wave file is made from:
-Frequency      422 Hz
-Amplitude       -2 dbFS (db [relative] to Full Scale)
-Duration         3 Seconds
-Sample Rate     48 KHz
-
-Measured frequencies:
-File            420 Hz
-Sudoku          ??
-*/
 
 void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Output Buffer\n");
-    
-    HRESULT hr = NULL;
-
-    // initialize
-    LPDIRECTSOUND direct_sound;
-
-    hr = DirectSoundCreate(0, &direct_sound, 0);
-    DEBUG_ERROR("Failed to init DirectSound\n");
-
-    hr = direct_sound->SetCooperativeLevel(args->hwnd, DSSCL_PRIORITY);
-    DEBUG_ERROR("Failed to set CoopLevel\n");
-
-    WAVEFORMATEX wave_fmt = {};
-    wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
-    wave_fmt.nChannels       = OUTPUT_CHANNELS;
-    wave_fmt.nSamplesPerSec  = OUTPUT_SAMPLE_RATE;
-    wave_fmt.wBitsPerSample  = OUTPUT_DEPTH;
-    wave_fmt.nBlockAlign     = OUTPUT_SAMPLE_BYTES;
-    wave_fmt.nAvgBytesPerSec = OUTPUT_SAMPLE_RATE * OUTPUT_SAMPLE_BYTES;
-    wave_fmt.cbSize          = 0;
-
-    printf("  -  format        %u\n", wave_fmt.wFormatTag);
-    printf("  -  channels      %u\n", wave_fmt.nChannels);
-    printf("  -  sample rate   %u\n", wave_fmt.nSamplesPerSec);
-    printf("  -  depth         %u\n", wave_fmt.wBitsPerSample);
-
-    {
-        DSBUFFERDESC buffer_desc = {};
-        buffer_desc.dwSize  = sizeof(buffer_desc);
-        buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
-
-        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.main_buffer, 0);
-        DEBUG_ERROR("Failed to create main buffer\n");
-
-        hr = buffers.main_buffer->SetFormat(&wave_fmt);
-        DEBUG_ERROR("Failed to set main format\n");
-    }
-
-    {
-        DSBUFFERDESC buffer_desc = {};
-        buffer_desc.dwSize        = sizeof(buffer_desc);
-        buffer_desc.dwFlags       = DSBCAPS_GLOBALFOCUS;
-        buffer_desc.dwBufferBytes = BUFFER_LEN;
-        buffer_desc.lpwfxFormat   = &wave_fmt;
-
-        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.off_buffer, 0);
-        DEBUG_ERROR("Failed to create off buffer\n");
-    }
-
+    init_directsound(args->hwnd);
 
     printf("[Audio] Loading Sounds\n");
     wav_to_sound("./res/422hz_-2db_3s_48khz.wav", &sounds.sin);
     wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav", &sounds.sweep);
-
-    // FIXME - remove this when the time comes
-#if 1
-    printf("\n[Audio] Debug Sound Data Buffer\n");
-    u32 xx = BUFFER_LEN / 256;
-    graph_buffer(80,18,(i16*)sounds.sin.data + (BUFFER_LEN-xx),xx);
-#else
-    Sound sound;
-    sound.byte_length = BUFFER_LEN;
-    sound.sample_rate = OUTPUT_SAMPLE_RATE;
-    sound.depth       = 16;
-    sound.channels    = 1;
-
-    sound.data = malloc(BUFFER_LEN * 2);
-    i16* data = (i16*) sound.data;
-    f32 t = 0.0;
-    f32 delta = f32(TAU) / f32(BUFFER_LEN-1);
-    for (u32 i = 0; i < BUFFER_LEN; i++) {
-        data[i] = (i16) (sin(422.0f * t) * (1<<15));
-        t += delta;
-    }
-
-    printf("\n[Audio] Debug Sound Data Buffer\n");
-    u32 xx = BUFFER_LEN / 256;
-    graph_buffer(80,18,data + (BUFFER_LEN-xx),xx);
-#endif
-
-    hr = NULL;
 
     // timing
     f32 total_time = 0.0;
@@ -419,18 +342,11 @@ void audio_loop(ThreadArgs* args) {
     f32 delta_s = 0.0;
 
     RingBuffer* events = &(args->events);
-    Status playing[N_EVENTS]; // FIXME update this to N_SOUNDS
-    Event  queued[N_EVENTS];
-    u32    play_tail  = 0;
-    u32    queue_tail = 0;
+    Status playing[N_SOUNDS];
+    u32 play_tail  = 0;
 
-    // FIXME - debug sound
-    playing[0].start_time = total_time;
-    playing[0].end_time   = f32(sounds.sin.length) / sounds.sin.sample_rate;
-    playing[0].layer      = 0;
-    playing[0].respond    = {EVENT_TEST, 0.5, 0.0};
-    playing[0].current    = playing[0].respond;
 
+    // loop locals
     f32 last_write = 0.0;
     u32 offset = 0;
 
@@ -438,59 +354,24 @@ void audio_loop(ThreadArgs* args) {
     while (1) {
         QueryPerformanceCounter(&start_time);
 
-#if 0
-        // queue sounds in response to events from the main thread
-        u32 sig = WaitForSingleObject(args->mutex,0);
-        if (sig == WAIT_OBJECT_0) {
-            const u32 a[2] = {events->ptr, 0};
-            const u32 b[2] = {N_EVENTS, events->ptr};
-            for (u8 out = 0; out < 2; out++) {
-                for (u32 idx = a[out]; idx < b[out]; idx++) {
-                    if (events->ring[idx].id == EVENT_DEFAULT) continue;
-                    queued[queue_tail] = events->ring[idx];
-                    queue_tail = (queue_tail+1) % N_EVENTS; // FIXME - if we actually overflow, we don't want this
-                    printf("[Audio] Queued event - %u\n", events->ring[idx].id);
+#if 1
+        // respond to main thread
+        if (args->new_event) {
+            u32 sig = WaitForSingleObject(args->mutex,0);
+            if (sig == WAIT_OBJECT_0) {
+                for (u32 i = args->events.ptr; i < N_EVENTS; i++) {
+
                 }
+
+                args->new_event = 0;
+                ReleaseMutex(args->mutex);
             }
-            ReleaseMutex(args->mutex);
-        }
-
-        // FIXME - something isnt getting cleared here
-        if (queue_tail > 0) {
-            printf("[Audio] Sound Queue Length - %u\n", queue_tail);
-        }
-
-        // FIXME - convert queued sounds to playing sounds?
-#endif
-
-        /*
-           Workflow
-           ----------------------------
-           Respond to Events
-           Update Playing Sounds (need to do something from the queue)
-           Write to Layer                   -  Layers have n channels
-           Mix Layers to Master             -  Master has  n channels
-           Write Master to Output           -  Output is the flat DirectSound buffer
-
-           ** Layers idea might suck
-           - for example, instead you could have your "layers" be 
-           an array of ID's. then each time you write a sound,
-           you compute the sounds modifier based on the event and the layer flags.
-        */
-
-        // FIXME - debug sound loop
-        // on this topic, what if we made this a part of the event? for example a "looping" flag
-        // if something is looping then we also need to emit an event to stop the looping ... 
-#if 0
-        if (total_time > playing[0].end_time) {
-            playing[0].start_time  = total_time;
-            playing[0].end_time   += total_time;
-            playing[0].current     = playing[0].respond;
         }
 #endif
 
         // ==================================================================
 
+#if 0
         // NOTE: Data should not be written to the part of the buffer after the play cursor and before the write cursor
         u32 play_cursor  = NULL;
         u32 write_cursor = NULL;
@@ -535,6 +416,7 @@ void audio_loop(ThreadArgs* args) {
         // FIXME - we can go faster than our delta_s can record, so just delay by 1ms
         // if we run this at 30ms it plays smoother?
         Sleep(1);
+#endif
 
         // timing
         QueryPerformanceCounter(&end_time);

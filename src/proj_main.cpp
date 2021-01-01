@@ -1,5 +1,6 @@
 // local
 #include "proj_types.h"
+#include "proj_math.h"
 #include "proj_sound.h"
 
 // third party
@@ -29,109 +30,6 @@
 #else
     #define DEBUG 0
 #endif
-
-
-// math
-union vec3 {
-    struct {
-        f32 x;
-        f32 y;
-        f32 z;
-    };
-    f32 a[3];
-};
-
-union vec4 {
-    struct {
-        f32 x;
-        f32 y;
-        f32 z;
-        f32 w;
-    };
-    f32 a[4];
-};
-
-union mat4 {
-    struct {
-        vec4 x;
-        vec4 y;
-        vec4 z;
-        vec4 w;
-    };
-    vec4 v[4];
-    f32  a[16];
-};
-
-void print_vec4(vec4* v) {
-    printf("(  ");
-    for (u32 i = 0; i < 4; i++) {
-        printf("%+.4f  ",v->a[i]);
-    }
-    printf(")\n");
-}
-
-void print_mat4(mat4* m) {
-    printf("[\n");
-    for (u32 i = 0; i < 4; i++) {
-        printf("    ");
-        for (u32 j = 0; j < 4; j++) {
-            printf("%+.4f  ",m->v[j].a[i]);
-        }
-        printf("\n");
-    }
-    printf("]\n");
-}
-
-void zero_vec4(vec4* v) {
-    for (u32 i = 0; i < 4; i++) {
-        v->a[i] = 0.0f;
-    }
-}
-
-void zero_mat4(mat4* m) {
-    for (u32 i = 0; i < 4; i++) {
-        zero_vec4(&m->v[i]);
-    }
-}
-
-void identity(mat4* m) {
-    zero_mat4(m);
-    for(u32 i = 0; i < 4; i++) {
-        m->v[i].a[i] = 1.0;
-    }
-}
-
-void project_orthographic(mat4* m, f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far) {
-    // expects identity matrix
-    f32 drl = right - left;
-    f32 dtb = top   - bottom;
-    f32 dfn = far   - near;
-
-    m->x.x =  2 / drl;
-    m->y.y =  2 / dtb;
-    m->z.z = -2 / dfn;
-
-    m->w.x = -(right + left  ) / drl;
-    m->w.y = -(top   + bottom) / dtb;
-    m->w.z = -(far   + near  ) / dfn;
-}
-
-void translate_mat4(mat4* m, vec3 v) {
-    // expects identity matrix
-    m->w.x = v.x;
-    m->w.y = v.y;
-    m->w.z = v.z;
-}
-
-void scale_mat4(mat4* m, vec3 v) {
-    // expects identity matrix
-    m->x.x = v.x;
-    m->y.y = v.y;
-    m->z.z = v.z;
-}
-
-
-
 
 
 // shaders
@@ -1197,8 +1095,8 @@ void main() {
     audio_args.hwnd  = hwnd;
     audio_args.mutex = CreateMutex(NULL, FALSE, NULL);
 
-    RingBuffer  local_event_data;
-    RingBuffer* local_events = &local_event_data;
+    RingBuffer  local_events_data;
+    RingBuffer* local_events = &local_events_data;
     RingBuffer* audio_events = &audio_args.events;
 
     HANDLE audio_thread = CreateThread( 
@@ -1274,6 +1172,7 @@ void main() {
 
 
         // event handling
+        u8 audio_updated = 0; // set this if an audio event occurredc
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
             // reset for new event
             InputEvent event = input_queue[event_idx];
@@ -1604,8 +1503,9 @@ void main() {
 
                 // FIXME - audio debug event
                 if (!handled && KEY_UP(GLFW_KEY_V)) {
-                    ring_push(local_events, {EVENT_TEST, 0.5, 0.0});
                     printf("[Main] Created Event\n");
+                    ring_push(local_events, {EVENT_TEST, 0.5, 0.0});
+                    audio_updated = 1;
                 }
 
                 // recompile shaders
@@ -1728,18 +1628,18 @@ void main() {
             }
         }
 
-        // update audio - FIXME
-        if (local_events->ptr > 0 || local_events->ring[N_EVENTS-1].id != EVENT_DEFAULT) {
+        // update audio
+        if (audio_updated) {
             u32 sig = WaitForSingleObject(audio_args.mutex,0);
             if (sig == WAIT_OBJECT_0) {
                 printf("[Main] Copying Event Ring\n");
+                audio_updated = 0;
 
                 memcpy(audio_events, local_events, sizeof(RingBuffer));
+                audio_args.new_event = 1;
                 ReleaseMutex(audio_args.mutex);
 
                 memset(local_events, 0, sizeof(RingBuffer));
-                // FIXME - so we clear it here, but what if the audio thread doesn't
-                //         get to it in time, so then we lose a buffer of events zzz
             }
         }
 
