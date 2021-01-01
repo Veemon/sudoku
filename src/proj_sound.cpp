@@ -5,9 +5,15 @@ Sound sounds[N_SOUNDS];
 AudioBuffers buffers;
 
 
+
+u8 wow_time_to_go = 0;
+
+
 // -- Sound Utils
 
 void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
+    if (wow_time_to_go != 1) return;
+
     // grab range of data
     f32 min = F32_MAX;
     f32 max = 0.0f;
@@ -28,6 +34,9 @@ void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
     u32  bytes = x_samples * sizeof(f32);
     f32* desc  = (f32*) malloc(bytes);
     memset(desc, 0, bytes);
+
+#if 0
+    // averaging
     for (u32 i = 0; i < length; i++) {
         u32 idx = i / width;
         if (idx > x_samples - 1) break;
@@ -36,6 +45,17 @@ void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
     for (u32 i = 0; i < x_samples; i++) {
         desc[i] /= (f32)width;
     }
+#else
+    // midpoints
+    u32 hw = width >> 1;
+    u32 acc = hw;
+    for (u32 i = 0; i < x_samples; i++) {
+        desc[i] = data[acc];
+        acc += hw;
+        if (acc > length - 1) break;
+    }
+#endif
+
 
     // draw graph
     f32 y_next;
@@ -294,31 +314,51 @@ void output_buffer() {
         i16* ra       = (i16*)region_a;
         for (u32 i = 0; i < a_offset; i++) {
             // set output
-            *(ra++) = i16(buffers.master[0][i] * 32768);
-            *(ra++) = i16(buffers.master[1][i] * 32768);
+            *(ra++) = i16(buffers.master[0][i] * (1<<15));
+            *(ra++) = i16(buffers.master[1][i] * (1<<15));
 
             // clear master
             buffers.master[0][i] = 0.0;
             buffers.master[1][i] = 0.0;
         }
 
+
         u32  b_offset = region_b_bytes / OUTPUT_SAMPLE_BYTES;
         i16* rb       = (i16*)region_b;
         for (u32 i = 0; i < b_offset; i++) {
             // set output
-            *(rb++) = i16(buffers.master[0][a_offset+i] * 32768);
-            *(rb++) = i16(buffers.master[1][a_offset+i] * 32768);
+            *(rb++) = i16(buffers.master[0][a_offset+i] * (1<<15));
+            *(rb++) = i16(buffers.master[1][a_offset+i] * (1<<15));
 
             // clear master
-            buffers.master[0][i+a_offset] = 0.0;
-            buffers.master[1][i+a_offset] = 0.0;
+            buffers.master[0][a_offset+i] = 0.0;
+            buffers.master[1][a_offset+i] = 0.0;
         }
+
+        ra = (i16*) malloc(region_a_bytes);
+        rb = (i16*) malloc(region_b_bytes);
+        memcpy(ra, region_a, region_a_bytes);
+        memcpy(rb, region_b, region_b_bytes);
 
         hr = buffers.off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
         DEBUG_ERROR("Failed to unlock\n");
 
         hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
         DEBUG_ERROR("Failed to play\n");
+
+        {
+            printf("\nRegion A\n");
+            graph_buffer(256, 25, ra, a_offset >> 1);
+        }
+
+
+        {
+            printf("\nRegion B\n");
+            graph_buffer(256, 25, rb, b_offset >> 1);
+        }
+
+        free(ra);
+        free(rb);
     }
 }
 
@@ -345,7 +385,6 @@ void audio_loop(ThreadArgs* args) {
     // loop locals
     RingBuffer* events = &(args->events);
     Status active_sounds[N_SOUNDS];
-
 
     printf("[Audio] Beginning Polling\n");
     while (1) {
@@ -389,11 +428,61 @@ void audio_loop(ThreadArgs* args) {
         }
 
 #if 1
-        // FIXME -- sound is very, very quick!
-        i64 offset = (total_time_ms - active_sounds[0].start_time_ms) * sounds[0].sample_rate;
-        sound_to_layer(&sounds[0], 0, offset);
-        mix_to_master();
-        output_buffer();
+        // FIXME -- sound is correct length, but quite distorted
+        if (active_sounds[0].mode != MODE_DEFAULT) {
+            i64 offset = (total_time_ms - active_sounds[0].start_time_ms) * sounds[0].sample_rate;
+            offset /= 1000;
+
+            {
+                printf("\nSound\n");
+                graph_buffer(256, 25, (i16*) sounds[0].data, sounds[0].length >> 6);
+            }
+
+            sound_to_layer(&sounds[0], 0, offset);
+
+            {
+                printf("\nLayer Left\n");
+                i16 layer_left[BUFFER_LEN];
+                for (u32 i = 0; i < BUFFER_LEN; i++) {
+                    layer_left[i] = i16(buffers.layers[0][0][i] * (1<<15));
+                }
+                graph_buffer(256, 25, (i16*) &layer_left[0], BUFFER_LEN >> 4);
+            }
+
+            {
+                printf("\nLayer Right\n");
+                i16 layer_right[BUFFER_LEN];
+                for (u32 i = 0; i < BUFFER_LEN; i++) {
+                    layer_right[i] = i16(buffers.layers[0][1][i] * (1<<15));
+                }
+                graph_buffer(256, 25, (i16*) &layer_right[0], BUFFER_LEN >> 4);
+            }
+
+            mix_to_master();
+
+            {
+                printf("\nMaster Left\n");
+                i16 master_left[BUFFER_LEN];
+                for (u32 i = 0; i < BUFFER_LEN; i++) {
+                    master_left[i] = i16(buffers.master[0][i] * (1<<15));
+                }
+                graph_buffer(256, 25, (i16*) &master_left[0], BUFFER_LEN >> 4);
+            }
+
+            {
+                printf("\nMaster Right\n");
+                i16 master_right[BUFFER_LEN];
+                for (u32 i = 0; i < BUFFER_LEN; i++) {
+                    master_right[i] = i16(buffers.master[1][i] * (1<<15));
+                }
+                graph_buffer(256, 25, (i16*) &master_right[0], BUFFER_LEN >> 4);
+            }
+
+            output_buffer();
+
+            if (wow_time_to_go > 1) {printf("byebye\n"); return;}
+            else wow_time_to_go++;
+        }
 #endif
 
         // timing
