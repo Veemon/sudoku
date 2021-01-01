@@ -1081,8 +1081,9 @@ void main() {
     delta_ms.QuadPart = 0;
 
     i64 total_time_ms = 0;
+    f32 total_time    = 0.0f;
 
-    i64 solve_wait_ms  = 320;
+    i64 solve_wait_ms  = 25;
     i64 solve_timer_ms = solve_wait_ms;
 
     i64 render_wait_ms  = 1000 / monitor_rate;
@@ -1253,7 +1254,7 @@ void main() {
                         board_input_type = LIST_SKIP;
                     }
 
-                    total_time_at_click = f64(total_time_ms) / 1000.0;
+                    total_time_at_click = total_time;
                     handled = 1;
                 }
             }
@@ -1677,7 +1678,7 @@ void main() {
             glUniformMatrix4fv(u_proj_mouse,  1, GL_FALSE, &proj.a[0]);
             glUniformMatrix4fv(u_model_mouse, 1, GL_FALSE, &scale_mouse.a[0]);
 
-            glUniform2f(u_time_mouse, f64(total_time_ms) / 1000.0, total_time_at_click);
+            glUniform2f(u_time_mouse, total_time, total_time_at_click);
             glUniform2f(u_mouse_mouse, mouse_x, mouse_y);
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -1702,6 +1703,8 @@ void main() {
         total_time_ms   += delta_ms.QuadPart;
         render_timer_ms += delta_ms.QuadPart;
         solve_timer_ms  += delta_ms.QuadPart; // FIXME: switch all of these to MS counter-part
+
+        total_time = f64(total_time_ms) / 1000.0;
     }
 
     glfwDestroyWindow(window);

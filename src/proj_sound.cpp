@@ -120,8 +120,8 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     fread(sound->data, sizeof(u8), length, file);
 
     // sample length and time
-    sound->length = sound->byte_length / ((sound->depth>>3) * sound->channels);
-    sound->time   = f32(sound->length) / f32(sound->sample_rate);
+    sound->length  = sound->byte_length / ((sound->depth>>3) * sound->channels);
+    sound->time_ms = (i64(sound->length) * 1000) / sound->sample_rate;
 
     printf("[Audio] Sound - %s\n", filename);
     printf("  -  format        %u\n", format);
@@ -130,7 +130,7 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     printf("  -  depth         %u\n", sound->depth);
     printf("  -  bytes         %u\n", sound->byte_length);
     printf("  -  length        %u\n", sound->length);
-    printf("  -  time          %.4f\n", sound->time);
+    printf("  -  time ms       %lld\n", sound->time_ms);
     printf("  -  data          %p\n", sound->data);
 
     fclose(file);
@@ -358,7 +358,6 @@ void audio_loop(ThreadArgs* args) {
     while (1) {
         QueryPerformanceCounter(&start_time);
 
-#if 1
         // respond to main thread
         if (args->new_event) {
             #define iter    args->events.ring[i]
@@ -372,12 +371,12 @@ void audio_loop(ThreadArgs* args) {
                 for (u8 outer = 0; outer < 2; outer++) {
                     for (u32 i = start_args[outer]; i < end_args[outer]; i++) {
                         if (iter.mode == MODE_DEFAULT) break;
-                        active_sounds[iter.sound_id].mode       = iter.mode;
-                        active_sounds[iter.sound_id].layer      = iter.layer;
-                        active_sounds[iter.sound_id].start_time = total_time;
-                        active_sounds[iter.sound_id].end_time   = total_time + sounds[iter.sound_id].time;
-                        active_sounds[iter.sound_id].volume     = iter.volume;
-                        active_sounds[iter.sound_id].angle      = iter.angle;
+                        active_sounds[iter.sound_id].mode          = iter.mode;
+                        active_sounds[iter.sound_id].layer         = iter.layer;
+                        active_sounds[iter.sound_id].start_time_ms = total_time_ms;
+                        active_sounds[iter.sound_id].end_time_ms   = total_time_ms + sounds[iter.sound_id].time_ms;
+                        active_sounds[iter.sound_id].volume        = iter.volume;
+                        active_sounds[iter.sound_id].angle         = iter.angle;
                     }
                 }
 
@@ -388,63 +387,34 @@ void audio_loop(ThreadArgs* args) {
                 #define X   active_sounds[i]
                 printf("[Audio] Sounds\n------------------------------------------------\n");
                 for (u32 i = 0; i < N_SOUNDS; i++) {
-                    printf("[%u] mode: %2u  layer: %2u   t0: %2.3f  t1: %2.3f\n", 
-                            i, X.mode, X.layer, X.start_time, X.end_time);
+                    printf("[%u] mode: %2u  layer: %2u   t0: %lld  t1: %lld\n", 
+                            i, X.mode, X.layer, X.start_time_ms, X.end_time_ms);
                 }
                 #undef X
             }
             #undef iter
         }
-#endif
 
-        // ==================================================================
 
-#if 0
         // NOTE: Data should not be written to the part of the buffer after the play cursor and before the write cursor
+#if 0
         u32 play_cursor  = NULL;
         u32 write_cursor = NULL;
         hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
         DEBUG_ERROR("Failed to get cursor positions\n");
 
-        u32 distance = play_cursor - play_cursor;
-        if (write_cursor < play_cursor) {
-            distance = BUFFER_LEN - play_cursor + write_cursor;
-        }
+        offset = 
 
-        printf("[Audio]  Play %u    Write %u", play_cursor, write_cursor);
-        const f32 recip = 1.0f / (f32(OUTPUT_SAMPLE_RATE) * f32(OUTPUT_SAMPLE_BYTES) * f32(OUTPUT_CHANNELS));
-        f32 w = distance * recip;
         if ((total_time - last_write) + 1e-8 >= w) {
-            last_write = total_time;
-            offset += distance;
-
             sound_to_layer(&sounds.sin, 0, offset);
             mix_to_master();
             output_buffer(play_cursor, write_cursor);
         }
-        printf("\n");
-
-        // FIXME
-        /* 
-           I don't understand the sound buffer.
-           the play-write cursor dynamic means it doesn't sync up with my timing
-
-           [0,1,2,3,4,5,6]    44 800 Hz         let the distance d = write - play
-            ^     ^               16 bit        let the number of elapsed samples s = d / ((16 / 8) * 2)
-            p     w                2 channel    If w = s/44800, then the next time you write must be w seconds from the time you last wrote.
-
-            the offset will then be shifted by s each time
-
-        */
-
-        // FIXME - if we play sound at 44KHz, and this thread is running > 1GHz,
-        //         there is only so much processing we can do before we should really be just going to sleep.
-        //         that way we're also not hogging the event mutex 
-
 #endif
-        Sleep(1); // This thread tends to run < 1ms for the moment
 
         // timing
+        Sleep(1); // This thread tends to run < 1ms for the moment
+
         QueryPerformanceCounter(&end_time);
         delta_ms.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_ms.QuadPart *= 1000;

@@ -24,7 +24,7 @@ struct Sound {
     u8    depth;
     u8    channels;
     u32   byte_length;
-    f32   time;
+    i64   time_ms;
     void* data;
 };
 
@@ -48,12 +48,12 @@ struct Event {
 };
 
 struct Status {
-    u8    mode        = MODE_DEFAULT;
-    u8    layer       = 0;
-    f32   start_time  = 0.0f;
-    f32   end_time    = 0.0f;
-    f32   volume      = 0.0f;
-    f32   angle       = 0.0f;
+    u8    mode          = MODE_DEFAULT;
+    u8    layer         = 0;
+    f32   volume        = 0.0f;
+    f32   angle         = 0.0f;
+    i64   start_time_ms = 0;
+    i64   end_time_ms   = 0;
 };
 
 #define N_EVENTS 256
