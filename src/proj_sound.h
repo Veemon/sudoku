@@ -52,7 +52,7 @@ struct Status {
     u8    layer         = 0;
     f32   volume        = 0.0f;
     f32   angle         = 0.0f;
-    i64   start_time_ms = 0;
+    i64   start_time_us = 0;
     i64   end_time_ms   = 0;
 };
 
@@ -81,7 +81,8 @@ struct ThreadArgs {
 #define LAYER_CHANNELS          2
 #define MASTER_CHANNELS         2
 
-#define BUFFER_LEN              OUTPUT_SAMPLE_RATE // 1 second
+#define BUFFER_LEN              (OUTPUT_SAMPLE_RATE)
+
 struct AudioBuffers {
     f32 layers[N_LAYERS][LAYER_CHANNELS][BUFFER_LEN] = {0.0f};
     f32 master[MASTER_CHANNELS][BUFFER_LEN]          = {0.0f};

@@ -4,16 +4,11 @@
 Sound sounds[N_SOUNDS];
 AudioBuffers buffers;
 
-
-
-u8 wow_time_to_go = 0;
-
+u8 not_playing = 1;
 
 // -- Sound Utils
 
 void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
-    if (wow_time_to_go != 1) return;
-
     // grab range of data
     f32 min = F32_MAX;
     f32 max = 0.0f;
@@ -256,9 +251,13 @@ void init_directsound(HWND hwnd) {
     printf("  -  depth         %u\n", wave_fmt.wBitsPerSample);
 
     {
-        DSBUFFERDESC buffer_desc = {};
-        buffer_desc.dwSize  = sizeof(buffer_desc);
-        buffer_desc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+        DSBUFFERDESC buffer_desc    = {};
+        buffer_desc.dwSize          = sizeof(DSBUFFERDESC);
+        buffer_desc.dwFlags         = DSBCAPS_PRIMARYBUFFER;
+        buffer_desc.dwBufferBytes   = 0;
+        buffer_desc.dwReserved      = 0;
+        buffer_desc.lpwfxFormat     = NULL;
+        buffer_desc.guid3DAlgorithm = GUID_NULL;
 
         hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.main_buffer, 0);
         DEBUG_ERROR("Failed to create main buffer\n");
@@ -268,19 +267,24 @@ void init_directsound(HWND hwnd) {
     }
 
     {
-        DSBUFFERDESC buffer_desc = {};
-        buffer_desc.dwSize        = sizeof(buffer_desc);
-        buffer_desc.dwFlags       = DSBCAPS_GLOBALFOCUS;
-        buffer_desc.dwBufferBytes = BUFFER_LEN;
-        buffer_desc.lpwfxFormat   = &wave_fmt;
+        DSBUFFERDESC buffer_desc    = {};
+        buffer_desc.dwSize          = sizeof(DSBUFFERDESC);
+        buffer_desc.dwFlags         = DSBCAPS_GLOBALFOCUS;
+        buffer_desc.dwBufferBytes   = BUFFER_LEN;
+        buffer_desc.dwReserved      = 0;
+        buffer_desc.lpwfxFormat     = &wave_fmt;
+        buffer_desc.guid3DAlgorithm = GUID_NULL;
 
         hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.off_buffer, 0);
         DEBUG_ERROR("Failed to create off buffer\n");
     }
 }
 
+i64 __prev = -1;
 
 void output_buffer() {
+    HRESULT hr;
+
     void* region_a       = nullptr;
     void* region_b       = nullptr;
     u32   region_a_bytes = NULL;
@@ -288,8 +292,10 @@ void output_buffer() {
 
     u32 play_cursor  = NULL;
     u32 write_cursor = NULL;
-    HRESULT hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+    hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
     DEBUG_ERROR("Failed to get cursor positions\n");
+
+    // if (__prev != -1 && __prev != write_cursor) return;
 
     // write_bytes are the byte size of the locked region
     u32 write_bytes = 0;
@@ -306,6 +312,9 @@ void output_buffer() {
             &region_a, (LPDWORD)&region_a_bytes, 
             &region_b, (LPDWORD)&region_b_bytes,
             NULL);
+
+    hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+    __prev = play_cursor;
 
     DEBUG_ERROR("Failed to lock\n");
 
@@ -335,30 +344,12 @@ void output_buffer() {
             buffers.master[1][a_offset+i] = 0.0;
         }
 
-        ra = (i16*) malloc(region_a_bytes);
-        rb = (i16*) malloc(region_b_bytes);
-        memcpy(ra, region_a, region_a_bytes);
-        memcpy(rb, region_b, region_b_bytes);
-
         hr = buffers.off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
         DEBUG_ERROR("Failed to unlock\n");
 
-        hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
+        // hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
+        hr = buffers.off_buffer->Play(NULL, NULL, NULL);
         DEBUG_ERROR("Failed to play\n");
-
-        {
-            printf("\nRegion A\n");
-            graph_buffer(256, 25, ra, a_offset >> 1);
-        }
-
-
-        {
-            printf("\nRegion B\n");
-            graph_buffer(256, 25, rb, b_offset >> 1);
-        }
-
-        free(ra);
-        free(rb);
     }
 }
 
@@ -375,12 +366,15 @@ void audio_loop(ThreadArgs* args) {
 
 
     // timing
-    LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
+    LARGE_INTEGER start_time, end_time, delta_us, cpu_freq;
     QueryPerformanceFrequency(&cpu_freq);
-    delta_ms.QuadPart = 0;
+    delta_us.QuadPart = 0;
 
+    i64 total_time_us = 0;
     i64 total_time_ms = 0;
-    f32 total_time    = 0.0f;
+
+    i64 write_wait  = pow_10[6] / (BUFFER_LEN>>1);
+    i64 write_timer = write_wait;
 
     // loop locals
     RingBuffer* events = &(args->events);
@@ -405,7 +399,7 @@ void audio_loop(ThreadArgs* args) {
                         if (iter.mode == MODE_DEFAULT) break;
                         active_sounds[iter.sound_id].mode          = iter.mode;
                         active_sounds[iter.sound_id].layer         = iter.layer;
-                        active_sounds[iter.sound_id].start_time_ms = total_time_ms;
+                        active_sounds[iter.sound_id].start_time_us = total_time_us;
                         active_sounds[iter.sound_id].end_time_ms   = total_time_ms + sounds[iter.sound_id].time_ms;
                         active_sounds[iter.sound_id].volume        = iter.volume;
                         active_sounds[iter.sound_id].angle         = iter.angle;
@@ -420,7 +414,7 @@ void audio_loop(ThreadArgs* args) {
                 printf("[Audio] Sounds\n------------------------------------------------\n");
                 for (u32 i = 0; i < N_SOUNDS; i++) {
                     printf("[%u] mode: %2u  layer: %2u   t0: %lld  t1: %lld\n", 
-                            i, X.mode, X.layer, X.start_time_ms, X.end_time_ms);
+                            i, X.mode, X.layer, X.start_time_us, X.end_time_ms);
                 }
                 #undef X
             }
@@ -429,72 +423,44 @@ void audio_loop(ThreadArgs* args) {
 
 #if 1
         // FIXME -- sound is correct length, but quite distorted
-        if (active_sounds[0].mode != MODE_DEFAULT) {
-            i64 offset = (total_time_ms - active_sounds[0].start_time_ms) * sounds[0].sample_rate;
-            offset /= 1000;
+        // if (write_timer >= write_wait || true) {
+        //     write_timer -= write_wait;
 
-            {
-                printf("\nSound\n");
-                graph_buffer(256, 25, (i16*) sounds[0].data, sounds[0].length >> 6);
+        u32 play_cursor  = NULL;
+        u32 write_cursor = NULL;
+        HRESULT hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+        DEBUG_ERROR("Failed to get cursor positions\n");
+
+        if (__prev == -1 || __prev >= write_cursor) {
+            if (active_sounds[0].mode != MODE_DEFAULT) {
+                printf("play: %u    write: %u    prev: %lld\n", 
+                        play_cursor, write_cursor, __prev);
+
+                i64 offset;
+                offset  = (total_time_us - active_sounds[0].start_time_us) * sounds[0].sample_rate;
+                offset /= pow_10[6];
+                offset = 0; // FIXME - zeroing this for audio sync popping
+
+                sound_to_layer(&sounds[0], 0, offset);
+                mix_to_master();
+
+                output_buffer();
+
+                // DEBUG
+                // active_sounds[0].mode = MODE_DEFAULT;
             }
-
-            sound_to_layer(&sounds[0], 0, offset);
-
-            {
-                printf("\nLayer Left\n");
-                i16 layer_left[BUFFER_LEN];
-                for (u32 i = 0; i < BUFFER_LEN; i++) {
-                    layer_left[i] = i16(buffers.layers[0][0][i] * (1<<15));
-                }
-                graph_buffer(256, 25, (i16*) &layer_left[0], BUFFER_LEN >> 4);
-            }
-
-            {
-                printf("\nLayer Right\n");
-                i16 layer_right[BUFFER_LEN];
-                for (u32 i = 0; i < BUFFER_LEN; i++) {
-                    layer_right[i] = i16(buffers.layers[0][1][i] * (1<<15));
-                }
-                graph_buffer(256, 25, (i16*) &layer_right[0], BUFFER_LEN >> 4);
-            }
-
-            mix_to_master();
-
-            {
-                printf("\nMaster Left\n");
-                i16 master_left[BUFFER_LEN];
-                for (u32 i = 0; i < BUFFER_LEN; i++) {
-                    master_left[i] = i16(buffers.master[0][i] * (1<<15));
-                }
-                graph_buffer(256, 25, (i16*) &master_left[0], BUFFER_LEN >> 4);
-            }
-
-            {
-                printf("\nMaster Right\n");
-                i16 master_right[BUFFER_LEN];
-                for (u32 i = 0; i < BUFFER_LEN; i++) {
-                    master_right[i] = i16(buffers.master[1][i] * (1<<15));
-                }
-                graph_buffer(256, 25, (i16*) &master_right[0], BUFFER_LEN >> 4);
-            }
-
-            output_buffer();
-
-            if (wow_time_to_go > 1) {printf("byebye\n"); return;}
-            else wow_time_to_go++;
         }
 #endif
 
-        // timing
-        Sleep(1); // This thread tends to run < 1ms for the moment
-
+        // FIXME timing - switch to [us]
         QueryPerformanceCounter(&end_time);
-        delta_ms.QuadPart = end_time.QuadPart - start_time.QuadPart;
-        delta_ms.QuadPart *= 1000;
-        delta_ms.QuadPart /= cpu_freq.QuadPart;
+        delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
+        delta_us.QuadPart *= pow_10[6];
+        delta_us.QuadPart /= cpu_freq.QuadPart;
 
-        total_time_ms += delta_ms.QuadPart;
+        total_time_us += delta_us.QuadPart;
+        write_timer   += delta_us.QuadPart;
 
-        total_time = f64(total_time_ms) / 1000.0;
+        total_time_ms = total_time_us / 1000;
     }
 }
