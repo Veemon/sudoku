@@ -1076,18 +1076,17 @@ void main() {
 
 
     // timing
-    f32 total_time = 0.0;
     LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
     QueryPerformanceFrequency(&cpu_freq);
     delta_ms.QuadPart = 0;
 
-    f32 delta_s = 0.0;
+    i64 total_time_ms = 0;
 
-    f32 solve_wait   = 0.032;
-    f32 solve_timer  = solve_wait;
+    i64 solve_wait_ms  = 320;
+    i64 solve_timer_ms = solve_wait_ms;
 
-    f32 render_wait  = 1.0 / f32(monitor_rate);
-    f32 render_timer = render_wait;
+    i64 render_wait_ms  = 1000 / monitor_rate;
+    i64 render_timer_ms = render_wait_ms;
 
 
     // audio
@@ -1100,12 +1099,12 @@ void main() {
     RingBuffer* audio_events = &audio_args.events;
 
     HANDLE audio_thread = CreateThread( 
-            NULL,                   // default security attributes
-            0,                      // use default stack size  
+            NULL,                                // default security attributes
+            0,                                   // use default stack size  
             (LPTHREAD_START_ROUTINE) audio_loop, // thread function name
-            &audio_args,                   // argument to thread function - note: may not like u touching another threads stack
-            0,                      // use default creation flags 
-            NULL);                  // returns the thread identifier
+            &audio_args,                         // argument to thread function - note: may not like u touching another threads stack
+            0,                                   // use default creation flags 
+            NULL);                               // returns the thread identifier
 
 
 
@@ -1116,6 +1115,10 @@ void main() {
 
     f32 x_ratio = 1.0f, y_ratio = 1.0f;
     f32 adx     = 0.0f, ady     = 0.0f;
+
+
+    // audio thread sync
+    u8 audio_updated = 0; // set this if an audio event occurredc
 
 
     // game
@@ -1172,7 +1175,6 @@ void main() {
 
 
         // event handling
-        u8 audio_updated = 0; // set this if an audio event occurredc
         for (u32 event_idx = 0; event_idx < input_index; event_idx++) {
             // reset for new event
             InputEvent event = input_queue[event_idx];
@@ -1213,7 +1215,7 @@ void main() {
 
             // get hover with deadband
             if (screen_x < 1.0f && screen_y < 1.0f) {
-                const f32 gamma = 0.8f * (1.0f/9.0f);
+                const f32 gamma = 0.1f * (1.0f/9.0f);
 
                 f32 xn = screen_x * 9.0f;
                 i8  xi = i8(xn);
@@ -1251,7 +1253,7 @@ void main() {
                         board_input_type = LIST_SKIP;
                     }
 
-                    total_time_at_click = total_time;
+                    total_time_at_click = f64(total_time_ms) / 1000.0;
                     handled = 1;
                 }
             }
@@ -1278,7 +1280,7 @@ void main() {
                         for (u8 j = 0; j < 9; j++) {
                             for (u8 i = 0; i < 9; i++) {
                                 if (board_data[IDX(i,j)] & BOARD_FLAG_STATIC) {
-                                    solve_timer          = solve_wait;
+                                    solve_timer_ms       = solve_wait_ms;
                                     waiting_for_solution = true;
                                     base_x               = 0;
                                     base_y               = 0;
@@ -1504,7 +1506,7 @@ void main() {
                 // FIXME - audio debug event
                 if (!handled && KEY_UP(GLFW_KEY_V)) {
                     printf("[Main] Created Event\n");
-                    ring_push(local_events, {EVENT_TEST, 0.5, 0.0});
+                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.0f});
                     audio_updated = 1;
                 }
 
@@ -1559,8 +1561,8 @@ void main() {
         // FIXME: crashes on board full of statics
         // make solution progress
         if (waiting_for_solution) {
-            if (solve_timer >= solve_wait) {
-                solve_timer -= solve_wait;
+            if (solve_timer_ms >= solve_wait_ms) {
+                solve_timer_ms -= solve_wait_ms;
  
                 u8 status = PROGRESS_INV_CELL; 
                 while(status == PROGRESS_INV_CELL) {
@@ -1609,7 +1611,7 @@ void main() {
                     }
 
                     // nothing set, retry again next iteration
-                    if (!p2) solve_timer = solve_wait;
+                    if (!p2) solve_timer_ms = solve_wait_ms;
                    
                     if (status == PROGRESS_INV_CELL) {
                         stage = 0;
@@ -1644,8 +1646,8 @@ void main() {
         }
 
         // render
-        if (render_timer >= render_wait) {
-            render_timer -= render_wait;
+        if (render_timer_ms >= render_wait_ms) {
+            render_timer_ms -= render_wait_ms;
 
             glClearColor(0.9f, 0.9f, 0.9f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -1675,7 +1677,7 @@ void main() {
             glUniformMatrix4fv(u_proj_mouse,  1, GL_FALSE, &proj.a[0]);
             glUniformMatrix4fv(u_model_mouse, 1, GL_FALSE, &scale_mouse.a[0]);
 
-            glUniform2f(u_time_mouse, total_time, total_time_at_click);
+            glUniform2f(u_time_mouse, f64(total_time_ms) / 1000.0, total_time_at_click);
             glUniform2f(u_mouse_mouse, mouse_x, mouse_y);
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -1696,11 +1698,10 @@ void main() {
         delta_ms.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_ms.QuadPart *= 1000;
         delta_ms.QuadPart /= cpu_freq.QuadPart;
-        delta_s = f32(delta_ms.QuadPart) / 1000.f;
 
-        total_time   += delta_s;
-        render_timer += delta_s;
-        solve_timer  += delta_s;
+        total_time_ms   += delta_ms.QuadPart;
+        render_timer_ms += delta_ms.QuadPart;
+        solve_timer_ms  += delta_ms.QuadPart; // FIXME: switch all of these to MS counter-part
     }
 
     glfwDestroyWindow(window);

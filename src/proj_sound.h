@@ -12,19 +12,20 @@
 // standard (i forgot my convention on this)
 #include "stdio.h"
 
+
+
+#define SOUND_SIN   0
+#define SOUND_SWEEP 1
+#define N_SOUNDS    2
+
 struct Sound {
     u32   length;
     u16   sample_rate;
     u8    depth;
     u8    channels;
     u32   byte_length;
+    f32   time;
     void* data;
-};
-
-#define N_SOUNDS 2
-struct SoundLibrary {
-    Sound sin;
-    Sound sweep;
 };
 
 void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length);
@@ -32,24 +33,27 @@ i32 wav_to_sound(const char* filename, Sound* sound);
 
 
 
-#define EVENT_DEFAULT  0
-#define EVENT_TEST     1
+#define MODE_DEFAULT         0
+#define MODE_START           1
+#define MODE_SMOOTH_START    2
+#define MODE_STOP            3
+#define MODE_SMOOTH_STOP     4
+
 struct Event {
-    u16 id;
+    u16 sound_id;
+    u16 layer;
+    u8  mode;
     f32 volume;
-    f32 angle;    // TODO: imagine 5 channel audio all coming from the left
+    f32 angle;
 };
 
-#define STATUS_FLAG_DEFAULT         0
-#define STATUS_FLAG_STOP            1
-#define STATUS_FLAG_SMOOTH_STOP     2
 struct Status {
-    u8    mode        = STATUS_FLAG_DEFAULT;
+    u8    mode        = MODE_DEFAULT;
     u8    layer       = 0;
     f32   start_time  = 0.0f;
     f32   end_time    = 0.0f;
-    Event respond; // event taken from ring
-    Event current; // current status of the event
+    f32   volume      = 0.0f;
+    f32   angle       = 0.0f;
 };
 
 #define N_EVENTS 256
@@ -60,6 +64,12 @@ struct RingBuffer {
 
 void ring_push(RingBuffer* rb, Event e);
 
+struct ThreadArgs {
+    HWND    hwnd      = NULL;
+    HANDLE  mutex     = NULL;
+    u8      new_event = 0;
+    RingBuffer events;
+};
 
 
 #define OUTPUT_SAMPLE_RATE      48000
@@ -77,13 +87,6 @@ struct AudioBuffers {
     f32 master[MASTER_CHANNELS][BUFFER_LEN]          = {0.0f};
     LPDIRECTSOUNDBUFFER main_buffer;
     LPDIRECTSOUNDBUFFER off_buffer;
-};
-
-struct ThreadArgs {
-    HWND    hwnd      = NULL;
-    HANDLE  mutex     = NULL;
-    u8      new_event = 0;
-    RingBuffer events;
 };
 
 void audio_loop(ThreadArgs* args);

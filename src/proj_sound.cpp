@@ -1,7 +1,7 @@
 #include "proj_sound.h"
 
 
-SoundLibrary sounds;
+Sound sounds[N_SOUNDS];
 AudioBuffers buffers;
 
 
@@ -115,11 +115,13 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     u32 length = BIG_32(bytes);
     sound->byte_length = length;
 
-    sound->length = sound->byte_length / (sound->depth * sound->channels);
-
     sound->data = malloc(length);
     fseek(file, 44, SEEK_SET);
     fread(sound->data, sizeof(u8), length, file);
+
+    // sample length and time
+    sound->length = sound->byte_length / ((sound->depth>>3) * sound->channels);
+    sound->time   = f32(sound->length) / f32(sound->sample_rate);
 
     printf("[Audio] Sound - %s\n", filename);
     printf("  -  format        %u\n", format);
@@ -128,6 +130,7 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     printf("  -  depth         %u\n", sound->depth);
     printf("  -  bytes         %u\n", sound->byte_length);
     printf("  -  length        %u\n", sound->length);
+    printf("  -  time          %.4f\n", sound->time);
     printf("  -  data          %p\n", sound->data);
 
     fclose(file);
@@ -140,8 +143,8 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
 // -- RingBuffer Utils
 
 void ring_push(RingBuffer* rb, Event e) {
-    rb->ring[rb->ptr] = e;
     rb->ptr = (rb->ptr+1) % N_EVENTS;
+    rb->ring[rb->ptr] = e;
 }
 
 
@@ -331,24 +334,25 @@ void audio_loop(ThreadArgs* args) {
     init_directsound(args->hwnd);
 
     printf("[Audio] Loading Sounds\n");
-    wav_to_sound("./res/422hz_-2db_3s_48khz.wav", &sounds.sin);
-    wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav", &sounds.sweep);
+    wav_to_sound("./res/422hz_-2db_3s_48khz.wav", &sounds[0] + SOUND_SIN);
+    wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  &sounds[0] + SOUND_SWEEP);
+
 
     // timing
-    f32 total_time = 0.0;
     LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
     QueryPerformanceFrequency(&cpu_freq);
     delta_ms.QuadPart = 0;
-    f32 delta_s = 0.0;
 
-    RingBuffer* events = &(args->events);
-    Status playing[N_SOUNDS];
-    u32 play_tail  = 0;
-
+    i64 total_time_ms = 0;
+    f32 total_time    = 0.0f;
 
     // loop locals
+    RingBuffer* events = &(args->events);
+    Status active_sounds[N_SOUNDS];
+
     f32 last_write = 0.0;
     u32 offset = 0;
+
 
     printf("[Audio] Beginning Polling\n");
     while (1) {
@@ -357,15 +361,39 @@ void audio_loop(ThreadArgs* args) {
 #if 1
         // respond to main thread
         if (args->new_event) {
+            #define iter    args->events.ring[i]
             u32 sig = WaitForSingleObject(args->mutex,0);
             if (sig == WAIT_OBJECT_0) {
-                for (u32 i = args->events.ptr; i < N_EVENTS; i++) {
+                printf("[Audio] Recv. New Events\n");
 
+                // iteration over ring buffer
+                u32 start_args[] = {args->events.ptr, 0};
+                u32 end_args[]   = {N_EVENTS, args->events.ptr};
+                for (u8 outer = 0; outer < 2; outer++) {
+                    for (u32 i = start_args[outer]; i < end_args[outer]; i++) {
+                        if (iter.mode == MODE_DEFAULT) break;
+                        active_sounds[iter.sound_id].mode       = iter.mode;
+                        active_sounds[iter.sound_id].layer      = iter.layer;
+                        active_sounds[iter.sound_id].start_time = total_time;
+                        active_sounds[iter.sound_id].end_time   = total_time + sounds[iter.sound_id].time;
+                        active_sounds[iter.sound_id].volume     = iter.volume;
+                        active_sounds[iter.sound_id].angle      = iter.angle;
+                    }
                 }
 
                 args->new_event = 0;
                 ReleaseMutex(args->mutex);
+
+                // Debug active sounds
+                #define X   active_sounds[i]
+                printf("[Audio] Sounds\n------------------------------------------------\n");
+                for (u32 i = 0; i < N_SOUNDS; i++) {
+                    printf("[%u] mode: %2u  layer: %2u   t0: %2.3f  t1: %2.3f\n", 
+                            i, X.mode, X.layer, X.start_time, X.end_time);
+                }
+                #undef X
             }
+            #undef iter
         }
 #endif
 
@@ -413,18 +441,17 @@ void audio_loop(ThreadArgs* args) {
         //         there is only so much processing we can do before we should really be just going to sleep.
         //         that way we're also not hogging the event mutex 
 
-        // FIXME - we can go faster than our delta_s can record, so just delay by 1ms
-        // if we run this at 30ms it plays smoother?
-        Sleep(1);
 #endif
+        Sleep(1); // This thread tends to run < 1ms for the moment
 
         // timing
         QueryPerformanceCounter(&end_time);
         delta_ms.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_ms.QuadPart *= 1000;
         delta_ms.QuadPart /= cpu_freq.QuadPart;
-        delta_s = f32(delta_ms.QuadPart) / 1000.f;
 
-        total_time   += delta_s;
+        total_time_ms += delta_ms.QuadPart;
+
+        total_time = f64(total_time_ms) / 1000.0;
     }
 }
