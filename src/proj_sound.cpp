@@ -128,14 +128,13 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     fseek(file, 40, SEEK_SET);
     fread(&bytes[0], sizeof(u8), 4, file);
     u32 length = BIG_32(bytes);
-    sound->byte_length = length;
 
     sound->data = malloc(length);
     fseek(file, 44, SEEK_SET);
     fread(sound->data, sizeof(u8), length, file);
 
     // sample length and time
-    sound->length  = sound->byte_length / ((sound->depth>>3) * sound->channels);
+    sound->length  = length / ((sound->depth>>3) * sound->channels);
     sound->time_us = (i64(sound->length) * pow_10[6]) / sound->sample_rate;
 
     printf("[Audio] Sound - %s\n", filename);
@@ -143,7 +142,6 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     printf("  -  channels      %u\n",   sound->channels);
     printf("  -  sample rate   %u\n",   sound->sample_rate);
     printf("  -  depth         %u\n",   sound->depth);
-    printf("  -  bytes         %u\n",   sound->byte_length);
     printf("  -  length        %u\n",   sound->length);
     printf("  -  time us       %lld\n", sound->time_us);
     printf("  -  data          %p\n",   sound->data);
@@ -358,7 +356,9 @@ void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Output Buffer\n");
     init_directsound(args->hwnd);
 
+
     printf("[Audio] Loading Sounds\n");
+    memset(&sounds[0], 0, sizeof(Sound) * N_SOUNDS);
     wav_to_sound("./res/422hz_-2db_3s_48khz.wav", &sounds[0] + SOUND_SIN);
     wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  &sounds[0] + SOUND_SWEEP);
 
@@ -376,8 +376,6 @@ void audio_loop(ThreadArgs* args) {
     LARGE_INTEGER write_delta_us, last_write;
     write_delta_us.QuadPart = 0;
     last_write.QuadPart = 0;
-
-    u32 sound_offset = 0;
 
     u32 write_offset = 0; // essentially our write cursor
     u32 write_cursor = 0;
@@ -403,7 +401,7 @@ void audio_loop(ThreadArgs* args) {
                         if (iter.mode == MODE_DEFAULT) break;
                         active_sounds[iter.sound_id].mode          = iter.mode;
                         active_sounds[iter.sound_id].layer         = iter.layer;
-                        active_sounds[iter.sound_id].start_time_us = total_time_us;
+                        active_sounds[iter.sound_id].last_write_us = total_time_us;
                         active_sounds[iter.sound_id].end_time_us   = total_time_us + sounds[iter.sound_id].time_us;
                         active_sounds[iter.sound_id].volume        = iter.volume;
                         active_sounds[iter.sound_id].angle         = iter.angle;
@@ -418,7 +416,7 @@ void audio_loop(ThreadArgs* args) {
                 printf("[Audio] Sounds\n------------------------------------------------\n");
                 for (u32 i = 0; i < N_SOUNDS; i++) {
                     printf("[%u] mode: %2u  layer: %2u   t0: %lld  t1: %lld\n", 
-                            i, X.mode, X.layer, X.start_time_us, X.end_time_us);
+                            i, X.mode, X.layer, X.last_write_us, X.end_time_us);
                 }
                 #undef X
             }
@@ -443,18 +441,19 @@ void audio_loop(ThreadArgs* args) {
 
         total_time_us += delta_us.QuadPart;
 
-#if 1
+
         // write sounds to layers
         for (u16 sidx = 0; sidx < N_SOUNDS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // handle dead sounds
                 if (total_time_us > active_sounds[sidx].end_time_us) {
-                    printf("[Audio] Reset Sound\n");
                     active_sounds[sidx].mode = MODE_DEFAULT;
-                    sound_offset = 0;
+                    sounds[sidx].offset = 0;
                 } else {
-                    // FIXME: only writing to layer 0, not using volume/angle etc ...
-                    sound_to_layer(&sounds[sidx], 0, sound_offset);
+                    // FIXME:
+                    // -- volume
+                    // -- angle
+                    sound_to_layer(&sounds[sidx], active_sounds[sidx].layer, sounds[sidx].offset);
                 }
             }
         }
@@ -471,42 +470,13 @@ void audio_loop(ThreadArgs* args) {
         for (u16 sidx = 0; sidx < N_SOUNDS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // if its been more time than half the buffer at the output sample rate, increment
-                i64 sound_delta_us = (total_time_us - active_sounds[sidx].start_time_us);
+                i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);
                 if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
-                    active_sounds[sidx].start_time_us = total_time_us; // turn start_time_us into last_write_us.
-                    sound_offset += (BUFFER_LEN>>1);
+                    active_sounds[sidx].last_write_us = total_time_us;
+                    sounds[sidx].offset += (BUFFER_LEN>>1);
                 }
             }
         }
-
-#else
-        if (active_sounds[0].mode != MODE_DEFAULT) {
-            sound_to_layer(&sounds[0], 0, sound_offset);
-            mix_to_master();
-
-            u32 bytes_written;
-            bytes_written = output_buffer(write_offset, play_cursor);
-            write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
-
-            // if its been more time than half the buffer at the output sample rate, increment
-            i64 sound_delta_us = (total_time_us - active_sounds[0].start_time_us);
-            if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
-                active_sounds[0].start_time_us = total_time_us; // turn start_time_us into last_write_us.
-                sound_offset += (BUFFER_LEN>>1);
-            }
-
-            // FIXME: when the sound is dead, we still need to write zeros
-
-            // handle dead sounds
-            // TODO: reset in us
-            if (total_time_ms > active_sounds[0].end_time_ms) {
-                printf("[Audio] Reset Sound Sin\n");
-                active_sounds[0].mode = MODE_DEFAULT;
-                sound_offset = 0;
-            }
-
-        }
-#endif
 
 
         // timing - part 2/2
