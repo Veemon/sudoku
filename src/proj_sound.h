@@ -81,6 +81,8 @@ struct ThreadArgs {
 #define LAYER_CHANNELS          2
 #define MASTER_CHANNELS         2
 
+// NOTE: if you can fix the audio crackle, you can reduce the buffer size
+//       which in turn will reduce the audio latency
 #define BUFFER_LEN              (OUTPUT_SAMPLE_RATE)
 
 struct AudioBuffers {

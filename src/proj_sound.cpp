@@ -251,7 +251,9 @@ void init_directsound(HWND hwnd) {
     printf("  -  depth         %u\n", wave_fmt.wBitsPerSample);
 
     {
-        DSBUFFERDESC buffer_desc    = {};
+        DSBUFFERDESC buffer_desc;
+        memset(&buffer_desc, 0, sizeof(DSBUFFERDESC));
+
         buffer_desc.dwSize          = sizeof(DSBUFFERDESC);
         buffer_desc.dwFlags         = DSBCAPS_PRIMARYBUFFER;
         buffer_desc.dwBufferBytes   = 0;
@@ -267,10 +269,12 @@ void init_directsound(HWND hwnd) {
     }
 
     {
-        DSBUFFERDESC buffer_desc    = {};
+        DSBUFFERDESC buffer_desc;
+        memset(&buffer_desc, 0, sizeof(DSBUFFERDESC));
+
         buffer_desc.dwSize          = sizeof(DSBUFFERDESC);
-        buffer_desc.dwFlags         = DSBCAPS_GLOBALFOCUS;
-        buffer_desc.dwBufferBytes   = BUFFER_LEN;
+        buffer_desc.dwFlags         = DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2;
+        buffer_desc.dwBufferBytes   = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;
         buffer_desc.dwReserved      = 0;
         buffer_desc.lpwfxFormat     = &wave_fmt;
         buffer_desc.guid3DAlgorithm = GUID_NULL;
@@ -280,27 +284,18 @@ void init_directsound(HWND hwnd) {
     }
 }
 
-i64 __prev = -1;
-
-void output_buffer() {
+u32 output_buffer(u32 write_cursor, u32 play_cursor) {
     HRESULT hr;
 
     void* region_a       = nullptr;
     void* region_b       = nullptr;
-    u32   region_a_bytes = NULL;
-    u32   region_b_bytes = NULL;
-
-    u32 play_cursor  = NULL;
-    u32 write_cursor = NULL;
-    hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-    DEBUG_ERROR("Failed to get cursor positions\n");
-
-    // if (__prev != -1 && __prev != write_cursor) return;
+    u32   region_a_bytes = 0;
+    u32   region_b_bytes = 0;
 
     // write_bytes are the byte size of the locked region
     u32 write_bytes = 0;
     if (write_cursor == play_cursor) {
-        write_bytes = BUFFER_LEN;                 // fill the whole buffer up
+        write_bytes = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;  // fill the whole buffer up
     } else if (write_cursor > play_cursor) {
         write_bytes  = BUFFER_LEN - write_cursor; // go to the end of the ring
         write_bytes += play_cursor;               // go to the play cursor
@@ -312,11 +307,9 @@ void output_buffer() {
             &region_a, (LPDWORD)&region_a_bytes, 
             &region_b, (LPDWORD)&region_b_bytes,
             NULL);
-
-    hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-    __prev = play_cursor;
-
     DEBUG_ERROR("Failed to lock\n");
+
+    printf("--- OFF WE GO ---\n");
 
     if (SUCCEEDED(hr)) { 
         u32  a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
@@ -345,12 +338,14 @@ void output_buffer() {
         }
 
         hr = buffers.off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
+
         DEBUG_ERROR("Failed to unlock\n");
 
-        // hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
-        hr = buffers.off_buffer->Play(NULL, NULL, NULL);
+        hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
         DEBUG_ERROR("Failed to play\n");
     }
+
+    return region_a_bytes + region_b_bytes;
 }
 
 
@@ -373,12 +368,20 @@ void audio_loop(ThreadArgs* args) {
     i64 total_time_us = 0;
     i64 total_time_ms = 0;
 
-    i64 write_wait  = pow_10[6] / (BUFFER_LEN>>1);
-    i64 write_timer = write_wait;
-
     // loop locals
     RingBuffer* events = &(args->events);
     Status active_sounds[N_SOUNDS];
+
+    LARGE_INTEGER write_delta_us, last_write;
+    write_delta_us.QuadPart = 0;
+    last_write.QuadPart = 0;
+
+    u32 sound_offset = 0;
+
+    u32 write_offset = 0; // essentially our write cursor
+    u32 write_cursor = 0;
+    u32 play_cursor  = 0;
+    buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
 
     printf("[Audio] Beginning Polling\n");
     while (1) {
@@ -421,46 +424,38 @@ void audio_loop(ThreadArgs* args) {
             #undef iter
         }
 
-#if 1
-        // FIXME -- sound is correct length, but quite distorted
-        // if (write_timer >= write_wait || true) {
-        //     write_timer -= write_wait;
 
-        u32 play_cursor  = NULL;
-        u32 write_cursor = NULL;
-        HRESULT hr = buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-        DEBUG_ERROR("Failed to get cursor positions\n");
+        // FIXME - DEBUG
+        active_sounds[0].mode = MODE_START;
 
-        if (__prev == -1 || __prev >= write_cursor) {
-            if (active_sounds[0].mode != MODE_DEFAULT) {
-                printf("play: %u    write: %u    prev: %lld\n", 
-                        play_cursor, write_cursor, __prev);
-
-                i64 offset;
-                offset  = (total_time_us - active_sounds[0].start_time_us) * sounds[0].sample_rate;
-                offset /= pow_10[6];
-                offset = 0; // FIXME - zeroing this for audio sync popping
-
-                sound_to_layer(&sounds[0], 0, offset);
-                mix_to_master();
-
-                output_buffer();
-
-                // DEBUG
-                // active_sounds[0].mode = MODE_DEFAULT;
-            }
+        // poll for when safe to write
+        while (write_cursor < write_offset) {
+            buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
         }
-#endif
 
-        // FIXME timing - switch to [us]
+        // write sounds to layers and mix
+        if (active_sounds[0].mode != MODE_DEFAULT) {
+            sound_to_layer(&sounds[0], 0, sound_offset);
+            mix_to_master();
+
+            u32 bytes_written;
+            bytes_written = output_buffer(write_offset, play_cursor);
+            write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
+
+            // Now, why doesn't this work you may ask???
+            // An excellent question my beloved friend. Now you see russel,
+            // my suspicion leads me to believe that we write to output every iteration.
+            // sound_offset += bytes_written / OUTPUT_SAMPLE_BYTES; 
+        }
+
+
+        // timing
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
         total_time_us += delta_us.QuadPart;
-        write_timer   += delta_us.QuadPart;
-
         total_time_ms = total_time_us / 1000;
     }
 }
