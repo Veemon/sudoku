@@ -136,17 +136,17 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
 
     // sample length and time
     sound->length  = sound->byte_length / ((sound->depth>>3) * sound->channels);
-    sound->time_ms = (i64(sound->length) * 1000) / sound->sample_rate;
+    sound->time_us = (i64(sound->length) * pow_10[6]) / sound->sample_rate;
 
     printf("[Audio] Sound - %s\n", filename);
-    printf("  -  format        %u\n", format);
-    printf("  -  channels      %u\n", sound->channels);
-    printf("  -  sample rate   %u\n", sound->sample_rate);
-    printf("  -  depth         %u\n", sound->depth);
-    printf("  -  bytes         %u\n", sound->byte_length);
-    printf("  -  length        %u\n", sound->length);
-    printf("  -  time ms       %lld\n", sound->time_ms);
-    printf("  -  data          %p\n", sound->data);
+    printf("  -  format        %u\n",   format);
+    printf("  -  channels      %u\n",   sound->channels);
+    printf("  -  sample rate   %u\n",   sound->sample_rate);
+    printf("  -  depth         %u\n",   sound->depth);
+    printf("  -  bytes         %u\n",   sound->byte_length);
+    printf("  -  length        %u\n",   sound->length);
+    printf("  -  time us       %lld\n", sound->time_us);
+    printf("  -  data          %p\n",   sound->data);
 
     fclose(file);
     return 1;
@@ -176,16 +176,14 @@ void sound_to_layer(Sound* sound, u16 layer, i64 offset) {
         // if out of sound samples just play 0
         i64 sample_idx = offset + idx;
         if (sample_idx > sound->length - 1) {
-            buffers.layers[layer][0][idx] = 0.0;
-            buffers.layers[layer][1][idx] = 0.0;
-            continue;
+            return;
         }
 
         if (sound->channels == 1) {
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] = f32(interp[sample_idx]) / (1<<15);
-                buffers.layers[layer][1][idx] = f32(interp[sample_idx]) / (1<<15);
+                buffers.layers[layer][0][idx] += f32(interp[sample_idx]) / (1<<15);
+                buffers.layers[layer][1][idx] += f32(interp[sample_idx]) / (1<<15);
                 continue;
             }
         }
@@ -193,15 +191,15 @@ void sound_to_layer(Sound* sound, u16 layer, i64 offset) {
         if (sound->channels == 2) {
             if (sound->depth == 8) {
                 i8* interp = (i8*) sound->data;
-                buffers.layers[layer][0][idx] = f32(interp[(2*sample_idx)])   / (1<<7);
-                buffers.layers[layer][1][idx] = f32(interp[(2*sample_idx)+1]) / (1<<7);
+                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<7);
+                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<7);
                 continue;
             } 
             
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] = f32(interp[(2*sample_idx)])   / (1<<15);
-                buffers.layers[layer][1][idx] = f32(interp[(2*sample_idx)+1]) / (1<<15);
+                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<15);
+                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<15);
                 continue;
             }
         }
@@ -213,8 +211,13 @@ void mix_to_master() {
     // accumulate sounds from all layers
     for (u32 layer_idx = 0; layer_idx < N_LAYERS; layer_idx++) {
         for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
+            // write to master
             buffers.master[0][idx] += buffers.layers[layer_idx][0][idx];
             buffers.master[1][idx] += buffers.layers[layer_idx][1][idx];
+
+            // clear layer
+            buffers.layers[layer_idx][0][idx] = 0.0;
+            buffers.layers[layer_idx][1][idx] = 0.0;
         }
     }
     
@@ -309,7 +312,7 @@ u32 output_buffer(u32 write_cursor, u32 play_cursor) {
             NULL);
     DEBUG_ERROR("Failed to lock\n");
 
-    printf("--- OFF WE GO ---\n");
+    // printf("--- OFF WE GO ---\n");
 
     if (SUCCEEDED(hr)) { 
         u32  a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
@@ -364,9 +367,7 @@ void audio_loop(ThreadArgs* args) {
     LARGE_INTEGER start_time, end_time, delta_us, cpu_freq;
     QueryPerformanceFrequency(&cpu_freq);
     delta_us.QuadPart = 0;
-
     i64 total_time_us = 0;
-    i64 total_time_ms = 0;
 
     // loop locals
     RingBuffer* events = &(args->events);
@@ -403,7 +404,7 @@ void audio_loop(ThreadArgs* args) {
                         active_sounds[iter.sound_id].mode          = iter.mode;
                         active_sounds[iter.sound_id].layer         = iter.layer;
                         active_sounds[iter.sound_id].start_time_us = total_time_us;
-                        active_sounds[iter.sound_id].end_time_ms   = total_time_ms + sounds[iter.sound_id].time_ms;
+                        active_sounds[iter.sound_id].end_time_us   = total_time_us + sounds[iter.sound_id].time_us;
                         active_sounds[iter.sound_id].volume        = iter.volume;
                         active_sounds[iter.sound_id].angle         = iter.angle;
                     }
@@ -417,7 +418,7 @@ void audio_loop(ThreadArgs* args) {
                 printf("[Audio] Sounds\n------------------------------------------------\n");
                 for (u32 i = 0; i < N_SOUNDS; i++) {
                     printf("[%u] mode: %2u  layer: %2u   t0: %lld  t1: %lld\n", 
-                            i, X.mode, X.layer, X.start_time_us, X.end_time_ms);
+                            i, X.mode, X.layer, X.start_time_us, X.end_time_us);
                 }
                 #undef X
             }
@@ -441,10 +442,44 @@ void audio_loop(ThreadArgs* args) {
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
         total_time_us += delta_us.QuadPart;
-        total_time_ms = total_time_us / 1000;
 
+#if 1
+        // write sounds to layers
+        for (u16 sidx = 0; sidx < N_SOUNDS; sidx++) {
+            if (active_sounds[sidx].mode != MODE_DEFAULT) {
+                // handle dead sounds
+                if (total_time_us > active_sounds[sidx].end_time_us) {
+                    printf("[Audio] Reset Sound\n");
+                    active_sounds[sidx].mode = MODE_DEFAULT;
+                    sound_offset = 0;
+                } else {
+                    // FIXME: only writing to layer 0, not using volume/angle etc ...
+                    sound_to_layer(&sounds[sidx], 0, sound_offset);
+                }
+            }
+        }
 
-        // write sounds to layers and mix
+        // collapse layers to master
+        mix_to_master();
+
+        // output
+        u32 bytes_written;
+        bytes_written = output_buffer(write_offset, play_cursor);
+        write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
+
+        // update sound timing offsets
+        for (u16 sidx = 0; sidx < N_SOUNDS; sidx++) {
+            if (active_sounds[sidx].mode != MODE_DEFAULT) {
+                // if its been more time than half the buffer at the output sample rate, increment
+                i64 sound_delta_us = (total_time_us - active_sounds[sidx].start_time_us);
+                if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
+                    active_sounds[sidx].start_time_us = total_time_us; // turn start_time_us into last_write_us.
+                    sound_offset += (BUFFER_LEN>>1);
+                }
+            }
+        }
+
+#else
         if (active_sounds[0].mode != MODE_DEFAULT) {
             sound_to_layer(&sounds[0], 0, sound_offset);
             mix_to_master();
@@ -471,7 +506,7 @@ void audio_loop(ThreadArgs* args) {
             }
 
         }
-
+#endif
 
 
         // timing - part 2/2
@@ -481,6 +516,5 @@ void audio_loop(ThreadArgs* args) {
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
         total_time_us += delta_us.QuadPart;
-        total_time_ms = total_time_us / 1000;
     }
 }

@@ -24,7 +24,7 @@ struct Sound {
     u8    depth;
     u8    channels;
     u32   byte_length;
-    i64   time_ms;
+    i64   time_us;
     void* data;
 };
 
@@ -53,7 +53,7 @@ struct Status {
     f32   volume        = 0.0f;
     f32   angle         = 0.0f;
     i64   start_time_us = 0;
-    i64   end_time_ms   = 0;
+    i64   end_time_us   = 0;
 };
 
 #define N_EVENTS 256
