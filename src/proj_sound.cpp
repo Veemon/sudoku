@@ -163,25 +163,42 @@ void ring_push(RingBuffer* rb, Event e) {
 
 // -- Audio Pipeline functions
 
-void sound_to_layer(Sound* sound, u16 layer, i64 offset) {
-    for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
-        // FIXME: not taking into account sound data at all lmao
-        // sound data is:
-        // - range of [-2^(depth-1), 2^(depth-1)]
-        // - interleaved (channels)
-        // - variable depth
+void sound_to_layer(Sound* sound, Status* status) {
+    u16 layer  = status->layer;
+    u32 offset = status->offset;
 
-        // if out of sound samples just play 0
+    // NOTE: for now applying the radial interpretation of the angle,
+    //       but there are many methods of doing positioning, and so you would
+    //       most like not want to do that here.
+    f32 lmod = status->volume;
+    f32 rmod = status->volume;
+
+    const f32 delta = 0.1; // essentially distance between ears
+    lmod *= 1.0 - (status->angle - delta);
+    rmod *= status->angle + delta;
+
+    lmod = clip(lmod, 0.0f, 1.0f);
+    rmod = clip(rmod, 0.0f, 1.0f);
+
+    // FIXME: not taking into account sound data properly
+    for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
         i64 sample_idx = offset + idx;
         if (sample_idx > sound->length - 1) {
             return;
         }
 
         if (sound->channels == 1) {
+            if (sound->depth == 8) {
+                i8* interp = (i8*) sound->data;
+                buffers.layers[layer][0][idx] += f32(interp[sample_idx]) * lmod / (1<<7);
+                buffers.layers[layer][1][idx] += f32(interp[sample_idx]) * rmod / (1<<7);
+                continue;
+            }
+
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[sample_idx]) / (1<<15);
-                buffers.layers[layer][1][idx] += f32(interp[sample_idx]) / (1<<15);
+                buffers.layers[layer][0][idx] += f32(interp[sample_idx]) * lmod / (1<<15);
+                buffers.layers[layer][1][idx] += f32(interp[sample_idx]) * rmod / (1<<15);
                 continue;
             }
         }
@@ -189,19 +206,18 @@ void sound_to_layer(Sound* sound, u16 layer, i64 offset) {
         if (sound->channels == 2) {
             if (sound->depth == 8) {
                 i8* interp = (i8*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<7);
-                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<7);
+                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   * lmod / (1<<7);
+                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) * rmod / (1<<7);
                 continue;
             } 
             
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<15);
-                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<15);
+                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   * lmod / (1<<15);
+                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) * rmod / (1<<15);
                 continue;
             }
         }
-
     }
 }
 
@@ -401,6 +417,7 @@ void audio_loop(ThreadArgs* args) {
                         if (iter.mode == MODE_DEFAULT) break;
                         active_sounds[iter.sound_id].mode          = iter.mode;
                         active_sounds[iter.sound_id].layer         = iter.layer;
+                        active_sounds[iter.sound_id].offset        = 0;
                         active_sounds[iter.sound_id].last_write_us = total_time_us;
                         active_sounds[iter.sound_id].end_time_us   = total_time_us + sounds[iter.sound_id].time_us;
                         active_sounds[iter.sound_id].volume        = iter.volume;
@@ -424,9 +441,6 @@ void audio_loop(ThreadArgs* args) {
         }
 
 
-        // FIXME - DEBUG
-        // active_sounds[0].mode = MODE_START;
-
         // poll for when safe to write
         while (write_cursor < write_offset) {
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
@@ -448,12 +462,12 @@ void audio_loop(ThreadArgs* args) {
                 // handle dead sounds
                 if (total_time_us > active_sounds[sidx].end_time_us) {
                     active_sounds[sidx].mode = MODE_DEFAULT;
-                    sounds[sidx].offset = 0;
+                    active_sounds[sidx].offset = 0;
                 } else {
                     // FIXME:
                     // -- volume
                     // -- angle
-                    sound_to_layer(&sounds[sidx], active_sounds[sidx].layer, sounds[sidx].offset);
+                    sound_to_layer(&sounds[sidx], &active_sounds[sidx]);
                 }
             }
         }
@@ -473,7 +487,7 @@ void audio_loop(ThreadArgs* args) {
                 i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);
                 if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
                     active_sounds[sidx].last_write_us = total_time_us;
-                    sounds[sidx].offset += (BUFFER_LEN>>1);
+                    active_sounds[sidx].offset += (BUFFER_LEN>>1);
                 }
             }
         }

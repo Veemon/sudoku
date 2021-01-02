@@ -20,7 +20,6 @@
 
 struct Sound {
     u32   length;
-    u32   offset;
     u16   sample_rate;
     u8    depth;
     u8    channels;
@@ -50,6 +49,7 @@ struct Event {
 struct Status {
     u8    mode          = MODE_DEFAULT;
     u8    layer         = 0;
+    u32   offset        = 0;
     f32   volume        = 0.0f;
     f32   angle         = 0.0f;
     i64   last_write_us = 0;

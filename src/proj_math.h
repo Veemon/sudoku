@@ -30,7 +30,7 @@ const u32 pow_10[] = {
 };
 
 f32 abs(f32 x);
-
+f32 clip(f32 x, f32 a, f32 b);
 
 
 

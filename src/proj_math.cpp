@@ -5,6 +5,11 @@ f32 abs(f32 x) {
     return x * -1.0f;
 }
 
+f32 clip(f32 x, f32 a, f32 b) {
+    if (x < a) return a;
+    if (x > b) return b;
+    return x;
+}
 
 
 void print_vec4(vec4* v) {

@@ -1506,8 +1506,27 @@ void main() {
 
                 // FIXME - audio debug event
                 if (!handled && KEY_UP(GLFW_KEY_V)) {
-                    printf("[Main] Created Event\n");
                     ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.0f});
+                    audio_updated = 1;                                      
+                }                                                           
+                                                                            
+                if (!handled && KEY_UP(GLFW_KEY_B)) {                       
+                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.3f});
+                    audio_updated = 1;                                      
+                }                                                           
+                                                                            
+                if (!handled && KEY_UP(GLFW_KEY_N)) {                       
+                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.5f});
+                    audio_updated = 1;                                      
+                }                                                           
+                                                                            
+                if (!handled && KEY_UP(GLFW_KEY_M)) {                       
+                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.7f});
+                    audio_updated = 1;                                      
+                }                                                           
+                                                                            
+                if (!handled && KEY_UP(GLFW_KEY_COMMA)) {                   
+                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 1.0f});
                     audio_updated = 1;
                 }
 
