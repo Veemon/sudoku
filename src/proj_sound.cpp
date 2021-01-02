@@ -426,12 +426,23 @@ void audio_loop(ThreadArgs* args) {
 
 
         // FIXME - DEBUG
-        active_sounds[0].mode = MODE_START;
+        // active_sounds[0].mode = MODE_START;
 
         // poll for when safe to write
         while (write_cursor < write_offset) {
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
         }
+
+        
+        // timing - part 1/2
+        QueryPerformanceCounter(&end_time);
+        delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
+        delta_us.QuadPart *= pow_10[6];
+        delta_us.QuadPart /= cpu_freq.QuadPart;
+
+        total_time_us += delta_us.QuadPart;
+        total_time_ms = total_time_us / 1000;
+
 
         // write sounds to layers and mix
         if (active_sounds[0].mode != MODE_DEFAULT) {
@@ -442,14 +453,28 @@ void audio_loop(ThreadArgs* args) {
             bytes_written = output_buffer(write_offset, play_cursor);
             write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
 
-            // Now, why doesn't this work you may ask???
-            // An excellent question my beloved friend. Now you see russel,
-            // my suspicion leads me to believe that we write to output every iteration.
-            // sound_offset += bytes_written / OUTPUT_SAMPLE_BYTES; 
+            // if its been more time than half the buffer at the output sample rate, increment
+            i64 sound_delta_us = (total_time_us - active_sounds[0].start_time_us);
+            if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
+                active_sounds[0].start_time_us = total_time_us; // turn start_time_us into last_write_us.
+                sound_offset += (BUFFER_LEN>>1);
+            }
+
+            // FIXME: when the sound is dead, we still need to write zeros
+
+            // handle dead sounds
+            // TODO: reset in us
+            if (total_time_ms > active_sounds[0].end_time_ms) {
+                printf("[Audio] Reset Sound Sin\n");
+                active_sounds[0].mode = MODE_DEFAULT;
+                sound_offset = 0;
+            }
+
         }
 
 
-        // timing
+
+        // timing - part 2/2
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_us.QuadPart *= pow_10[6];
