@@ -236,11 +236,13 @@ void mix_to_master() {
             buffers.layers[layer_idx][1][idx] = 0.0;
         }
         
+#if 0
         // get clipping values
         for (u8 c = 0; c < MASTER_CHANNELS; c++) {
             f32 mag = abs(buffers.master[c][idx]);
             if (mag > _max - EPS) _max = mag;
         }
+#endif
     }
     
 #if 0
@@ -471,6 +473,8 @@ void audio_loop(ThreadArgs* args) {
         }
 
 
+        // FIXME: what if the offset is at 0 and write_cursor at BUFFER_LEN, 
+        //        waiting to wrap around.
         // poll for when safe to write
         while (write_cursor < write_offset) {
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
@@ -507,14 +511,16 @@ void audio_loop(ThreadArgs* args) {
         bytes_written = output_buffer(write_offset, play_cursor);
         write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
 
+
+        // FIXME - somehow timing is related to BUFFER_LEN
         // update sound timing offsets
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // if its been more time than half the buffer at the output sample rate, increment
                 i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);
-                if (sound_delta_us > ((BUFFER_LEN>>0) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
+                if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
                     active_sounds[sidx].last_write_us = total_time_us;
-                    active_sounds[sidx].offset += (BUFFER_LEN>>0);
+                    active_sounds[sidx].offset += (BUFFER_LEN>>1);
                 }
             }
         }

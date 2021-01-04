@@ -1505,6 +1505,11 @@ void main() {
                 }
 
                 // FIXME - audio debug events
+                if (!handled && KEY_UP(GLFW_KEY_X)) {
+                    ring_push(local_events, {SOUND_VOICE,  0, MODE_START, 1.0f, 0.5f});
+                    audio_updated = 1;                                      
+                }                                                           
+
                 if (!handled && KEY_UP(GLFW_KEY_C)) {
                     ring_push(local_events, {SOUND_SWEEP,  0, MODE_START, 1.0f, 0.5f});
                     audio_updated = 1;                                      

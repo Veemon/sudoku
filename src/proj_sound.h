@@ -86,7 +86,8 @@ struct ThreadArgs {
 #define MASTER_CHANNELS         2
 
 // NOTE: smaller buffer => less latency
-#define BUFFER_LEN              2048
+// #define BUFFER_LEN              2048
+#define BUFFER_LEN              (1<<16)
 
 struct AudioBuffers {
     f32 layers[N_LAYERS][LAYER_CHANNELS][BUFFER_LEN] = {0.0f};
