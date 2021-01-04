@@ -8,12 +8,13 @@
 #include "stdio.h"
 
 
+#define EPS         1e-6
 
-#define F32_MIN  0xff7fffff
-#define F32_MAX  0x7f7fffff
+#define F32_MIN     0xff7fffff
+#define F32_MAX     0x7f7fffff
 
-#define PI   3.14159265358979323846
-#define TAU  6.28318530717958647693
+#define PI          3.14159265358979323846
+#define TAU         6.28318530717958647693
 
 
 const u32 pow_10[] = {

@@ -1,7 +1,7 @@
 #include "proj_math.h"
 
 f32 abs(f32 x) {
-    if (x > 1e-8) return x;
+    if (x > EPS) return x;
     return x * -1.0f;
 }
 

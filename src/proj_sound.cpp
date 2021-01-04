@@ -4,8 +4,6 @@
 Sound sounds[N_SOUNDS];
 AudioBuffers buffers;
 
-u8 not_playing = 1;
-
 // -- Sound Utils
 
 void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
@@ -163,9 +161,10 @@ void ring_push(RingBuffer* rb, Event e) {
 
 // -- Audio Pipeline functions
 
-void sound_to_layer(Sound* sound, Status* status) {
-    u16 layer  = status->layer;
-    u32 offset = status->offset;
+void sound_to_layer(Status* status) {
+    Sound* sound = &sounds[status->sound_id];
+    u16 layer    = status->layer;
+    u32 offset   = status->offset;
 
     // NOTE: for now applying the radial interpretation of the angle,
     //       but there are many methods of doing positioning, and so you would
@@ -173,10 +172,11 @@ void sound_to_layer(Sound* sound, Status* status) {
     f32 lmod = status->volume;
     f32 rmod = status->volume;
 
-    const f32 delta = 0.1; // essentially distance between ears
+    const f32 delta = 0.05; // essentially width of sound
     lmod *= 1.0 - (status->angle - delta);
     rmod *= status->angle + delta;
 
+    // FIXME: kind of assumes mono audio :(
     lmod = clip(lmod, 0.0f, 1.0f);
     rmod = clip(rmod, 0.0f, 1.0f);
 
@@ -206,15 +206,15 @@ void sound_to_layer(Sound* sound, Status* status) {
         if (sound->channels == 2) {
             if (sound->depth == 8) {
                 i8* interp = (i8*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   * lmod / (1<<7);
-                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) * rmod / (1<<7);
+                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<7);
+                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<7);
                 continue;
             } 
             
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   * lmod / (1<<15);
-                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) * rmod / (1<<15);
+                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<15);
+                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<15);
                 continue;
             }
         }
@@ -222,9 +222,11 @@ void sound_to_layer(Sound* sound, Status* status) {
 }
 
 void mix_to_master() {
+    f32 _max = 1.0f;
+
     // accumulate sounds from all layers
-    for (u32 layer_idx = 0; layer_idx < N_LAYERS; layer_idx++) {
-        for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
+    for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
+        for (u32 layer_idx = 0; layer_idx < N_LAYERS; layer_idx++) {
             // write to master
             buffers.master[0][idx] += buffers.layers[layer_idx][0][idx];
             buffers.master[1][idx] += buffers.layers[layer_idx][1][idx];
@@ -233,9 +235,29 @@ void mix_to_master() {
             buffers.layers[layer_idx][0][idx] = 0.0;
             buffers.layers[layer_idx][1][idx] = 0.0;
         }
+        
+        // get clipping values
+        for (u8 c = 0; c < MASTER_CHANNELS; c++) {
+            f32 mag = abs(buffers.master[c][idx]);
+            if (mag > _max - EPS) _max = mag;
+        }
     }
     
-    // TODO: this is where we would normalize, or something
+    // max normalization
+    // -- because the buffer should be small to minimize latency,
+    //    it should be fine to apply simple max-rescale over the whole buffer.
+    f32 _max_recip = 1.0f / (_max + EPS);
+    for (u32 i = 0; i < BUFFER_LEN; i++) {
+        for (u8 c = 0; c < MASTER_CHANNELS; c++) {
+            buffers.master[c][i] *= _max_recip;
+        }
+    }
+
+    // smooth end transition
+    for (u8 c = 0; c < MASTER_CHANNELS; c++) {
+        f32 avg = 0.5f * (buffers.master[c][BUFFER_LEN-1] + buffers.prev_end[c]);
+        buffers.master[c][BUFFER_LEN-1] = avg;
+    }
 }
 
 
@@ -326,8 +348,12 @@ u32 output_buffer(u32 write_cursor, u32 play_cursor) {
             NULL);
     DEBUG_ERROR("Failed to lock\n");
 
-    // printf("--- OFF WE GO ---\n");
+    // store end for soft transition
+    for (u8 c = 0; c < MASTER_CHANNELS; c++) {
+        buffers.prev_end[c] = buffers.master[c][BUFFER_LEN - 1];
+    }
 
+    // write to """device"""
     if (SUCCEEDED(hr)) { 
         u32  a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
         i16* ra       = (i16*)region_a;
@@ -373,10 +399,15 @@ void audio_loop(ThreadArgs* args) {
     init_directsound(args->hwnd);
 
 
+    // FIXME - HIGH and SWEEP don't work?
     printf("[Audio] Loading Sounds\n");
     memset(&sounds[0], 0, sizeof(Sound) * N_SOUNDS);
-    wav_to_sound("./res/422hz_-2db_3s_48khz.wav", &sounds[0] + SOUND_SIN);
-    wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  &sounds[0] + SOUND_SWEEP);
+    {
+        Sound* ptr = &sounds[0];
+        wav_to_sound("./res/422hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_LOW);
+        wav_to_sound("./res/740hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_HIGH);
+        wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  ptr + SOUND_SWEEP);
+    }
 
 
     // timing
@@ -387,13 +418,14 @@ void audio_loop(ThreadArgs* args) {
 
     // loop locals
     RingBuffer* events = &(args->events);
-    Status active_sounds[N_SOUNDS];
+    Status active_sounds[N_EVENTS];
+    u16 active_ptr = 0; // -- active_sounds is circular
 
     LARGE_INTEGER write_delta_us, last_write;
     write_delta_us.QuadPart = 0;
     last_write.QuadPart = 0;
 
-    u32 write_offset = 0; // essentially our write cursor
+    u32 write_offset = 0; // -- essentially our write cursor
     u32 write_cursor = 0;
     u32 play_cursor  = 0;
     buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
@@ -415,27 +447,20 @@ void audio_loop(ThreadArgs* args) {
                 for (u8 outer = 0; outer < 2; outer++) {
                     for (u32 i = start_args[outer]; i < end_args[outer]; i++) {
                         if (iter.mode == MODE_DEFAULT) break;
-                        active_sounds[iter.sound_id].mode          = iter.mode;
-                        active_sounds[iter.sound_id].layer         = iter.layer;
-                        active_sounds[iter.sound_id].offset        = 0;
-                        active_sounds[iter.sound_id].last_write_us = total_time_us;
-                        active_sounds[iter.sound_id].end_time_us   = total_time_us + sounds[iter.sound_id].time_us;
-                        active_sounds[iter.sound_id].volume        = iter.volume;
-                        active_sounds[iter.sound_id].angle         = iter.angle;
+                        active_sounds[active_ptr].sound_id      = iter.sound_id;
+                        active_sounds[active_ptr].mode          = iter.mode;
+                        active_sounds[active_ptr].layer         = iter.layer;
+                        active_sounds[active_ptr].offset        = 0;
+                        active_sounds[active_ptr].last_write_us = total_time_us;
+                        active_sounds[active_ptr].end_time_us   = total_time_us + sounds[iter.sound_id].time_us;
+                        active_sounds[active_ptr].volume        = iter.volume;
+                        active_sounds[active_ptr].angle         = iter.angle;
+                        active_ptr = (active_ptr+1) % N_EVENTS;
                     }
                 }
 
                 args->new_event = 0;
                 ReleaseMutex(args->mutex);
-
-                // Debug active sounds
-                #define X   active_sounds[i]
-                printf("[Audio] Sounds\n------------------------------------------------\n");
-                for (u32 i = 0; i < N_SOUNDS; i++) {
-                    printf("[%u] mode: %2u  layer: %2u   t0: %lld  t1: %lld\n", 
-                            i, X.mode, X.layer, X.last_write_us, X.end_time_us);
-                }
-                #undef X
             }
             #undef iter
         }
@@ -452,22 +477,19 @@ void audio_loop(ThreadArgs* args) {
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
+        start_time = end_time;
 
         total_time_us += delta_us.QuadPart;
 
 
         // write sounds to layers
-        for (u16 sidx = 0; sidx < N_SOUNDS; sidx++) {
+        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // handle dead sounds
                 if (total_time_us > active_sounds[sidx].end_time_us) {
                     active_sounds[sidx].mode = MODE_DEFAULT;
-                    active_sounds[sidx].offset = 0;
                 } else {
-                    // FIXME:
-                    // -- volume
-                    // -- angle
-                    sound_to_layer(&sounds[sidx], &active_sounds[sidx]);
+                    sound_to_layer(&active_sounds[sidx]);
                 }
             }
         }
@@ -481,7 +503,7 @@ void audio_loop(ThreadArgs* args) {
         write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
 
         // update sound timing offsets
-        for (u16 sidx = 0; sidx < N_SOUNDS; sidx++) {
+        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // if its been more time than half the buffer at the output sample rate, increment
                 i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);

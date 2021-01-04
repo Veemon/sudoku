@@ -1504,32 +1504,36 @@ void main() {
                     }
                 }
 
-                // FIXME - audio debug event
+                // FIXME - audio debug events
+                if (!handled && KEY_UP(GLFW_KEY_C)) {
+                    ring_push(local_events, {SOUND_SWEEP,  0, MODE_START, 1.0f, 0.5f});
+                    audio_updated = 1;                                      
+                }                                                           
+
                 if (!handled && KEY_UP(GLFW_KEY_V)) {
-                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.0f});
+                    ring_push(local_events, {SOUND_SIN_LOW,  0, MODE_START, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_B)) {                       
-                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.3f});
+                    ring_push(local_events, {SOUND_SIN_HIGH, 0, MODE_START, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_N)) {                       
-                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {SOUND_SIN_LOW,  0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {SOUND_SIN_HIGH, 0, MODE_START, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_M)) {                       
-                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 0.7f});
+                    for (u32 i = 0; i < 64; i++) {
+                        ring_push(local_events, {SOUND_SIN_LOW,  0, MODE_START, 1.0f, 0.0f});
+                        ring_push(local_events, {SOUND_SIN_HIGH, 0, MODE_START, 1.0f, 1.0f});
+                    }
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
-                if (!handled && KEY_UP(GLFW_KEY_COMMA)) {                   
-                    ring_push(local_events, {SOUND_SIN, 0, MODE_START, 1.0f, 1.0f});
-                    audio_updated = 1;
-                }
-
                 // recompile shaders
                 if (!handled && KEY_UP(GLFW_KEY_F5)) {
                     handled = 1;

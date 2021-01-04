@@ -14,9 +14,10 @@
 
 
 
-#define SOUND_SIN   0
-#define SOUND_SWEEP 1
-#define N_SOUNDS    2
+#define SOUND_SIN_LOW       0
+#define SOUND_SIN_HIGH      1
+#define SOUND_SWEEP         2
+#define N_SOUNDS            3
 
 struct Sound {
     u32   length;
@@ -47,6 +48,8 @@ struct Event {
 };
 
 struct Status {
+    // u32 id   -- might need something like this for STOP on specific events
+    u16   sound_id      = NULL;
     u8    mode          = MODE_DEFAULT;
     u8    layer         = 0;
     u32   offset        = 0;
@@ -81,14 +84,13 @@ struct ThreadArgs {
 #define LAYER_CHANNELS          2
 #define MASTER_CHANNELS         2
 
-// NOTE: if you can fix the audio crackle, you can reduce the buffer size
-//       which in turn will reduce the audio latency
-// #define BUFFER_LEN              (OUTPUT_SAMPLE_RATE)
+// NOTE: smaller buffer => less latency
 #define BUFFER_LEN              2048
 
 struct AudioBuffers {
     f32 layers[N_LAYERS][LAYER_CHANNELS][BUFFER_LEN] = {0.0f};
     f32 master[MASTER_CHANNELS][BUFFER_LEN]          = {0.0f};
+    f32 prev_end[MASTER_CHANNELS];
     LPDIRECTSOUNDBUFFER main_buffer;
     LPDIRECTSOUNDBUFFER off_buffer;
 };
