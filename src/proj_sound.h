@@ -17,7 +17,8 @@
 #define SOUND_SIN_LOW       0
 #define SOUND_SIN_HIGH      1
 #define SOUND_SWEEP         2
-#define N_SOUNDS            3
+#define SOUND_VOICE         3
+#define N_SOUNDS            4
 
 struct Sound {
     u32   length;

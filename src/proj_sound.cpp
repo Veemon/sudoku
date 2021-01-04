@@ -243,6 +243,7 @@ void mix_to_master() {
         }
     }
     
+#if 0
     // max normalization
     // -- because the buffer should be small to minimize latency,
     //    it should be fine to apply simple max-rescale over the whole buffer.
@@ -252,12 +253,15 @@ void mix_to_master() {
             buffers.master[c][i] *= _max_recip;
         }
     }
+#endif
 
+#if 0
     // smooth end transition
     for (u8 c = 0; c < MASTER_CHANNELS; c++) {
         f32 avg = 0.5f * (buffers.master[c][BUFFER_LEN-1] + buffers.prev_end[c]);
         buffers.master[c][BUFFER_LEN-1] = avg;
     }
+#endif
 }
 
 
@@ -407,6 +411,7 @@ void audio_loop(ThreadArgs* args) {
         wav_to_sound("./res/422hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_LOW);
         wav_to_sound("./res/740hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_HIGH);
         wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  ptr + SOUND_SWEEP);
+        wav_to_sound("./res/voice_stereo_48khz.wav",        ptr + SOUND_VOICE);
     }
 
 
@@ -507,9 +512,9 @@ void audio_loop(ThreadArgs* args) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // if its been more time than half the buffer at the output sample rate, increment
                 i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);
-                if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
+                if (sound_delta_us > ((BUFFER_LEN>>0) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
                     active_sounds[sidx].last_write_us = total_time_us;
-                    active_sounds[sidx].offset += (BUFFER_LEN>>1);
+                    active_sounds[sidx].offset += (BUFFER_LEN>>0);
                 }
             }
         }
