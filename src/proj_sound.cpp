@@ -432,6 +432,7 @@ void audio_loop(ThreadArgs* args) {
     write_delta_us.QuadPart = 0;
     last_write.QuadPart = 0;
 
+    u32 prev_write   = 0;
     u32 write_offset = 0; // -- essentially our write cursor
     u32 write_cursor = 0;
     u32 play_cursor  = 0;
@@ -468,18 +469,46 @@ void audio_loop(ThreadArgs* args) {
 
                 args->new_event = 0;
                 ReleaseMutex(args->mutex);
+
+                // DEBUG
+                #define X  active_sounds[i]
+                for (u32 i = 0; i < N_EVENTS; i++) {
+                    printf("sid: %2u  mode: %2u  layer: %2u  off: %8u  lw: %8lld  ew: %8lld\n",
+                            X.sound_id, X.mode, X.layer, X.offset, X.last_write_us, X.end_time_us);
+                }
+                printf("\n");
+                #undef X
             }
             #undef iter
         }
 
 
+        // FIXME - THESE DONT EVER CHANGE?????
+        // fuck it then, switch this to a timer based system
+        // -- ofcourse it doesn't change, u print it when it equals 0
+
+        printf("[Audio] Stage 1           ... r: %8u  o: %8u  w: %8u  p:%u\n",
+                prev_write, write_offset, write_cursor, play_cursor);
+
         // FIXME: what if the offset is at 0 and write_cursor at BUFFER_LEN, 
         //        waiting to wrap around.
+        //      [ - - o - p - - w ]      ->      [ w - o - p - - - ]
+        while ((prev_write >= write_cursor) && (write_cursor > write_offset)) {
+            buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+        }
+        
+        printf("[Audio] Stage 2           ... r: %8u  o: %8u  w: %8u  p:%u\n",
+                prev_write, write_offset, write_cursor, play_cursor);
+
         // poll for when safe to write
         while (write_cursor < write_offset) {
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
         }
 
+        prev_write = write_offset;
+
+        printf("[Audio] Writing to output ... r: %8u  o: %8u  w: %8u  p:%u\n",
+                prev_write, write_offset, write_cursor, play_cursor);
         
         // timing - part 1/2
         QueryPerformanceCounter(&end_time);
@@ -513,14 +542,16 @@ void audio_loop(ThreadArgs* args) {
 
 
         // FIXME - somehow timing is related to BUFFER_LEN
+        //       - offset sounds like it overflowing? wtf?
         // update sound timing offsets
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
                 // if its been more time than half the buffer at the output sample rate, increment
+                const u64 portion = (BUFFER_LEN>>1);
                 i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);
-                if (sound_delta_us > ((BUFFER_LEN>>1) * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
+                if (sound_delta_us > (portion * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
                     active_sounds[sidx].last_write_us = total_time_us;
-                    active_sounds[sidx].offset += (BUFFER_LEN>>1);
+                    active_sounds[sidx].offset += portion;
                 }
             }
         }

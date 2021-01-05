@@ -60,7 +60,7 @@ struct Status {
     i64   end_time_us   = 0;
 };
 
-#define N_EVENTS 256
+#define N_EVENTS    4
 struct RingBuffer {
     u32   ptr            = 0;
     Event ring[N_EVENTS] = {0};
@@ -85,6 +85,7 @@ struct ThreadArgs {
 #define LAYER_CHANNELS          2
 #define MASTER_CHANNELS         2
 
+// FIXME
 // NOTE: smaller buffer => less latency
 // #define BUFFER_LEN              2048
 #define BUFFER_LEN              (1<<16)
