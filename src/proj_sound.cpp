@@ -160,12 +160,12 @@ void ring_push(RingBuffer* rb, Event e) {
 
 
 // -- Audio Pipeline functions
-
 void sound_to_layer(Status* status) {
     Sound* sound = &sounds[status->sound_id];
     u16 layer    = status->layer;
     u32 offset   = status->offset;
 
+    // FIXME: assumes mono audio :(
     // NOTE: for now applying the radial interpretation of the angle,
     //       but there are many methods of doing positioning, and so you would
     //       most like not want to do that here.
@@ -176,11 +176,10 @@ void sound_to_layer(Status* status) {
     lmod *= 1.0 - (status->angle - delta);
     rmod *= status->angle + delta;
 
-    // FIXME: kind of assumes mono audio :(
     lmod = clip(lmod, 0.0f, 1.0f);
     rmod = clip(rmod, 0.0f, 1.0f);
 
-    // FIXME: not taking into account sound data properly
+    // NOTE: assumes sound is same sample rate as output device
     for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
         i64 sample_idx = offset + idx;
         if (sample_idx > sound->length - 1) {
@@ -337,16 +336,21 @@ u32 output_buffer(u32 write_cursor, u32 play_cursor) {
     u32   region_a_bytes = 0;
     u32   region_b_bytes = 0;
 
+#if 0
     // write_bytes are the byte size of the locked region
     u32 write_bytes = 0;
     if (write_cursor == play_cursor) {
         write_bytes = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;  // fill the whole buffer up
     } else if (write_cursor > play_cursor) {
-        write_bytes  = BUFFER_LEN - write_cursor; // go to the end of the ring
-        write_bytes += play_cursor;               // go to the play cursor
+        write_bytes  = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;
+        write_bytes -= write_cursor; // go to the end of the ring
+        write_bytes += play_cursor;  // go to the play cursor
     } else if (write_cursor < play_cursor){
         write_bytes = play_cursor - write_cursor; // go to the play cursor
     }
+#endif
+
+    u32 write_bytes = (BUFFER_LEN>>1) * OUTPUT_SAMPLE_BYTES;
 
     hr = buffers.off_buffer->Lock(write_cursor, write_bytes, 
             &region_a, (LPDWORD)&region_a_bytes, 
@@ -390,7 +394,11 @@ u32 output_buffer(u32 write_cursor, u32 play_cursor) {
 
         DEBUG_ERROR("Failed to unlock\n");
 
+#if 0        
         hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
+#else
+        hr = buffers.off_buffer->Play(NULL, NULL, NULL);
+#endif
         DEBUG_ERROR("Failed to play\n");
     }
 
@@ -405,7 +413,8 @@ void audio_loop(ThreadArgs* args) {
     init_directsound(args->hwnd);
 
 
-    // FIXME - HIGH and SWEEP don't work?
+    // FIXME - is it possible im not reading these right,
+    //         that produces that weird offsettting?
     printf("[Audio] Loading Sounds\n");
     memset(&sounds[0], 0, sizeof(Sound) * N_SOUNDS);
     {
@@ -437,6 +446,9 @@ void audio_loop(ThreadArgs* args) {
     u32 write_cursor = 0;
     u32 play_cursor  = 0;
     buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+
+    const u64 output_samples = (BUFFER_LEN >> 1);
+    const u64 output_time_us = (output_samples * pow_10[6]) / OUTPUT_SAMPLE_RATE;
 
     printf("[Audio] Beginning Polling\n");
     while (1) {
@@ -483,34 +495,21 @@ void audio_loop(ThreadArgs* args) {
         }
 
 
-        // FIXME - THESE DONT EVER CHANGE?????
-        // fuck it then, switch this to a timer based system
-        // -- ofcourse it doesn't change, u print it when it equals 0
-
-        printf("[Audio] Stage 1           ... r: %8u  o: %8u  w: %8u  p:%u\n",
-                prev_write, write_offset, write_cursor, play_cursor);
-
-        // FIXME: what if the offset is at 0 and write_cursor at BUFFER_LEN, 
-        //        waiting to wrap around.
+        // catch waiting to wrap
         //      [ - - o - p - - w ]      ->      [ w - o - p - - - ]
-        while ((prev_write >= write_cursor) && (write_cursor > write_offset)) {
+        while ((prev_write < write_cursor) && (write_cursor < write_offset)) {
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
+            prev_write = write_cursor;
         }
-        
-        printf("[Audio] Stage 2           ... r: %8u  o: %8u  w: %8u  p:%u\n",
-                prev_write, write_offset, write_cursor, play_cursor);
 
         // poll for when safe to write
         while (write_cursor < write_offset) {
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
         }
-
         prev_write = write_offset;
-
-        printf("[Audio] Writing to output ... r: %8u  o: %8u  w: %8u  p:%u\n",
-                prev_write, write_offset, write_cursor, play_cursor);
         
         // timing - part 1/2
+#if 1
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_us.QuadPart *= pow_10[6];
@@ -518,16 +517,18 @@ void audio_loop(ThreadArgs* args) {
         start_time = end_time;
 
         total_time_us += delta_us.QuadPart;
-
+#endif
 
         // write sounds to layers
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
             if (active_sounds[sidx].mode != MODE_DEFAULT) {
+                printf("offset:  %8u  total:  %8u  ", active_sounds[sidx].offset, sounds[active_sounds[sidx].sound_id].length);
+                sound_to_layer(&active_sounds[sidx]);
+
                 // handle dead sounds
                 if (total_time_us > active_sounds[sidx].end_time_us) {
                     active_sounds[sidx].mode = MODE_DEFAULT;
-                } else {
-                    sound_to_layer(&active_sounds[sidx]);
+                    active_sounds[sidx].offset = 0;
                 }
             }
         }
@@ -538,24 +539,26 @@ void audio_loop(ThreadArgs* args) {
         // output
         u32 bytes_written;
         bytes_written = output_buffer(write_offset, play_cursor);
-        write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
+        write_offset  = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
 
+        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
+            if (active_sounds[sidx].mode != MODE_DEFAULT) {
+                printf("written:  %u\n", bytes_written);
+            }
+        }
 
+#if 1
         // FIXME - somehow timing is related to BUFFER_LEN
         //       - offset sounds like it overflowing? wtf?
         // update sound timing offsets
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-            if (active_sounds[sidx].mode != MODE_DEFAULT) {
-                // if its been more time than half the buffer at the output sample rate, increment
-                const u64 portion = (BUFFER_LEN>>1);
-                i64 sound_delta_us = (total_time_us - active_sounds[sidx].last_write_us);
-                if (sound_delta_us > (portion * pow_10[6]) / OUTPUT_SAMPLE_RATE - 1) {
-                    active_sounds[sidx].last_write_us = total_time_us;
-                    active_sounds[sidx].offset += portion;
-                }
+            if (active_sounds[sidx].mode == MODE_DEFAULT) continue;
+            if (sound_delta_us > ) {
+                active_sounds[sidx].last_write_us = total_time_us;
+                active_sounds[sidx].offset += samples_written;
             }
         }
-
+#endif
 
         // timing - part 2/2
         QueryPerformanceCounter(&end_time);
@@ -564,5 +567,6 @@ void audio_loop(ThreadArgs* args) {
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
         total_time_us += delta_us.QuadPart;
+
     }
 }

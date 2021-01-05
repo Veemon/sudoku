@@ -87,8 +87,11 @@ struct ThreadArgs {
 
 // FIXME
 // NOTE: smaller buffer => less latency
-// #define BUFFER_LEN              2048
-#define BUFFER_LEN              (1<<16)
+#if 0
+    #define BUFFER_LEN              2048
+#else
+    #define BUFFER_LEN              (1<<16)
+#endif
 
 struct AudioBuffers {
     f32 layers[N_LAYERS][LAYER_CHANNELS][BUFFER_LEN] = {0.0f};
