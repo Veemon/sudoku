@@ -22,6 +22,8 @@ if "%1" == "--test" goto TESTING
 if "%1" == "-d"      goto DEBUGGING
 if "%1" == "--debug" goto DEBUGGING
 
+echo [Release Enabled]
+echo.
 set ARGS=/O2
 set LINK_ARGS=/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 goto COMPILE

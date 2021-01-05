@@ -381,7 +381,7 @@ u32 output_buffer(u32 write_offset) {
 
         DEBUG_ERROR("Failed to unlock\n");
 
-#if 0
+#if 1
         hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
 #else
         hr = buffers.off_buffer->Play(NULL, NULL, NULL);
@@ -417,6 +417,8 @@ void audio_loop(ThreadArgs* args) {
     delta_us.QuadPart = 0;
     i64 total_time_us = 0;
 
+    i64 ns_acc = 0;
+
     // loop locals
     RingBuffer* events = &(args->events);
     Status active_sounds[N_EVENTS];
@@ -425,8 +427,8 @@ void audio_loop(ThreadArgs* args) {
     LARGE_INTEGER write_delta_us;
     write_delta_us.QuadPart = 0;
 
-    const u64 output_samples = (BUFFER_LEN >> 1);
-    const u64 output_time_us = (output_samples * pow_10[6]) / OUTPUT_SAMPLE_RATE;
+    u64 output_samples = (BUFFER_LEN >> 1);
+    u64 output_time_us = ((output_samples * pow_10[6]) / OUTPUT_SAMPLE_RATE);
     u64 output_write_timer = output_time_us;
 
     u32 prev_write   = 0;
@@ -476,16 +478,13 @@ void audio_loop(ThreadArgs* args) {
             #undef iter
         }
 
-        // FIXME - we go faster than microseconds
-        //printf("%6lld  --  %6lld\n", output_write_timer, output_time_us);
-        printf("%6lld  --  %6lld\r", output_write_timer, output_time_us);
+
         if (output_write_timer >= output_time_us) {
             output_write_timer -= output_time_us;
 
             // write sounds to layers
             for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
                 if (active_sounds[sidx].mode != EventMode::default) {
-                    printf("offset:  %8u  total:  %8u  ", active_sounds[sidx].offset, sounds[active_sounds[sidx].sound_id].length);
                     sound_to_layer(&active_sounds[sidx]);
 
                     // handle dead sounds
@@ -497,11 +496,13 @@ void audio_loop(ThreadArgs* args) {
 
             // collapse layers to master
             mix_to_master();
-
+#if 0            
+            // FIXME - Debug info to show potential desync
             u32 write = 0;
             u32 play = 0;
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play, (LPDWORD)&write); 
             printf("off: %6u  write: %6u  play: %u\n", write_offset, write, play);
+#endif
 
             // output
             u32 bytes_written;
@@ -519,8 +520,28 @@ void audio_loop(ThreadArgs* args) {
         // timing
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
+        LARGE_INTEGER delta_ns = delta_us;
+
+        delta_ns.QuadPart *= pow_10[9];
+        delta_ns.QuadPart /= cpu_freq.QuadPart;
+
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
+
+        // FIXME we literally go too fast
+        if (delta_us.QuadPart < 10) {
+            printf("%lld\n", delta_us.QuadPart);
+        }
+
+        // FIXME - tidy this up
+        // -- if we switch to PeakMessage with notify,
+        //    we'll most likely get better sync AND not have to worry bout
+        //    running literally faster than we can count
+        ns_acc += delta_ns.QuadPart - (delta_us.QuadPart * pow_10[3]);
+        while (ns_acc > pow_10[3] - 1) {
+            delta_us.QuadPart += 1;
+            ns_acc -= pow_10[3];
+        }
 
         total_time_us      += delta_us.QuadPart;
         output_write_timer += delta_us.QuadPart;

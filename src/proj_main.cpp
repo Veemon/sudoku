@@ -1504,6 +1504,7 @@ void main() {
                     }
                 }
 
+#if 1
                 // FIXME - audio debug events
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
                     ring_push(local_events, {EventMode::start, SOUND_VOICE, 0, 1.0f, 0.5f});
@@ -1537,7 +1538,8 @@ void main() {
                         ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 1.0f});
                     }
                     audio_updated = 1;                                      
-                }                                                           
+                }
+#endif
                                                                             
                 // recompile shaders
                 if (!handled && KEY_UP(GLFW_KEY_F5)) {
