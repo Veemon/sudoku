@@ -221,6 +221,7 @@ void sound_to_layer(Status* status) {
 }
 
 void mix_to_master() {
+    // FIXME - enable features again
     f32 _max = 1.0f;
 
     // accumulate sounds from all layers
@@ -328,7 +329,7 @@ void init_directsound(HWND hwnd) {
     }
 }
 
-u32 output_buffer(u32 write_cursor, u32 play_cursor) {
+u32 output_buffer(u32 write_offset) {
     HRESULT hr;
 
     void* region_a       = nullptr;
@@ -336,23 +337,9 @@ u32 output_buffer(u32 write_cursor, u32 play_cursor) {
     u32   region_a_bytes = 0;
     u32   region_b_bytes = 0;
 
-#if 0
-    // write_bytes are the byte size of the locked region
-    u32 write_bytes = 0;
-    if (write_cursor == play_cursor) {
-        write_bytes = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;  // fill the whole buffer up
-    } else if (write_cursor > play_cursor) {
-        write_bytes  = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;
-        write_bytes -= write_cursor; // go to the end of the ring
-        write_bytes += play_cursor;  // go to the play cursor
-    } else if (write_cursor < play_cursor){
-        write_bytes = play_cursor - write_cursor; // go to the play cursor
-    }
-#endif
-
     u32 write_bytes = (BUFFER_LEN>>1) * OUTPUT_SAMPLE_BYTES;
 
-    hr = buffers.off_buffer->Lock(write_cursor, write_bytes, 
+    hr = buffers.off_buffer->Lock(write_offset, write_bytes, 
             &region_a, (LPDWORD)&region_a_bytes, 
             &region_b, (LPDWORD)&region_b_bytes,
             NULL);
@@ -394,7 +381,7 @@ u32 output_buffer(u32 write_cursor, u32 play_cursor) {
 
         DEBUG_ERROR("Failed to unlock\n");
 
-#if 0        
+#if 0
         hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
 #else
         hr = buffers.off_buffer->Play(NULL, NULL, NULL);
@@ -413,8 +400,6 @@ void audio_loop(ThreadArgs* args) {
     init_directsound(args->hwnd);
 
 
-    // FIXME - is it possible im not reading these right,
-    //         that produces that weird offsettting?
     printf("[Audio] Loading Sounds\n");
     memset(&sounds[0], 0, sizeof(Sound) * N_SOUNDS);
     {
@@ -437,18 +422,15 @@ void audio_loop(ThreadArgs* args) {
     Status active_sounds[N_EVENTS];
     u16 active_ptr = 0; // -- active_sounds is circular
 
-    LARGE_INTEGER write_delta_us, last_write;
+    LARGE_INTEGER write_delta_us;
     write_delta_us.QuadPart = 0;
-    last_write.QuadPart = 0;
-
-    u32 prev_write   = 0;
-    u32 write_offset = 0; // -- essentially our write cursor
-    u32 write_cursor = 0;
-    u32 play_cursor  = 0;
-    buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
 
     const u64 output_samples = (BUFFER_LEN >> 1);
     const u64 output_time_us = (output_samples * pow_10[6]) / OUTPUT_SAMPLE_RATE;
+    u64 output_write_timer = output_time_us;
+
+    u32 prev_write   = 0;
+    u32 write_offset = 0; // -- essentially our write cursor
 
     printf("[Audio] Beginning Polling\n");
     while (1) {
@@ -466,7 +448,7 @@ void audio_loop(ThreadArgs* args) {
                 u32 end_args[]   = {N_EVENTS, args->events.ptr};
                 for (u8 outer = 0; outer < 2; outer++) {
                     for (u32 i = start_args[outer]; i < end_args[outer]; i++) {
-                        if (iter.mode == MODE_DEFAULT) break;
+                        if (iter.mode == EventMode::default) break;
                         active_sounds[active_ptr].sound_id      = iter.sound_id;
                         active_sounds[active_ptr].mode          = iter.mode;
                         active_sounds[active_ptr].layer         = iter.layer;
@@ -494,79 +476,53 @@ void audio_loop(ThreadArgs* args) {
             #undef iter
         }
 
+        // FIXME - we go faster than microseconds
+        //printf("%6lld  --  %6lld\n", output_write_timer, output_time_us);
+        printf("%6lld  --  %6lld\r", output_write_timer, output_time_us);
+        if (output_write_timer >= output_time_us) {
+            output_write_timer -= output_time_us;
 
-        // catch waiting to wrap
-        //      [ - - o - p - - w ]      ->      [ w - o - p - - - ]
-        while ((prev_write < write_cursor) && (write_cursor < write_offset)) {
-            buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-            prev_write = write_cursor;
-        }
+            // write sounds to layers
+            for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
+                if (active_sounds[sidx].mode != EventMode::default) {
+                    printf("offset:  %8u  total:  %8u  ", active_sounds[sidx].offset, sounds[active_sounds[sidx].sound_id].length);
+                    sound_to_layer(&active_sounds[sidx]);
 
-        // poll for when safe to write
-        while (write_cursor < write_offset) {
-            buffers.off_buffer->GetCurrentPosition((LPDWORD)&play_cursor, (LPDWORD)&write_cursor);
-        }
-        prev_write = write_offset;
-        
-        // timing - part 1/2
-#if 1
-        QueryPerformanceCounter(&end_time);
-        delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
-        delta_us.QuadPart *= pow_10[6];
-        delta_us.QuadPart /= cpu_freq.QuadPart;
-        start_time = end_time;
-
-        total_time_us += delta_us.QuadPart;
-#endif
-
-        // write sounds to layers
-        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-            if (active_sounds[sidx].mode != MODE_DEFAULT) {
-                printf("offset:  %8u  total:  %8u  ", active_sounds[sidx].offset, sounds[active_sounds[sidx].sound_id].length);
-                sound_to_layer(&active_sounds[sidx]);
-
-                // handle dead sounds
-                if (total_time_us > active_sounds[sidx].end_time_us) {
-                    active_sounds[sidx].mode = MODE_DEFAULT;
-                    active_sounds[sidx].offset = 0;
+                    // handle dead sounds
+                    if (total_time_us > active_sounds[sidx].end_time_us) {
+                        active_sounds[sidx].mode = EventMode::default;
+                    }
                 }
             }
-        }
 
-        // collapse layers to master
-        mix_to_master();
+            // collapse layers to master
+            mix_to_master();
 
-        // output
-        u32 bytes_written;
-        bytes_written = output_buffer(write_offset, play_cursor);
-        write_offset  = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
+            u32 write = 0;
+            u32 play = 0;
+            buffers.off_buffer->GetCurrentPosition((LPDWORD)&play, (LPDWORD)&write); 
+            printf("off: %6u  write: %6u  play: %u\n", write_offset, write, play);
 
-        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-            if (active_sounds[sidx].mode != MODE_DEFAULT) {
-                printf("written:  %u\n", bytes_written);
-            }
-        }
+            // output
+            u32 bytes_written;
+            bytes_written = output_buffer(write_offset);
+            write_offset  = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
 
-#if 1
-        // FIXME - somehow timing is related to BUFFER_LEN
-        //       - offset sounds like it overflowing? wtf?
-        // update sound timing offsets
-        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-            if (active_sounds[sidx].mode == MODE_DEFAULT) continue;
-            if (sound_delta_us > ) {
-                active_sounds[sidx].last_write_us = total_time_us;
+            // update sound timing offsets
+            u32 samples_written = bytes_written / OUTPUT_SAMPLE_BYTES;
+            for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
+                if (active_sounds[sidx].mode == EventMode::default) continue;
                 active_sounds[sidx].offset += samples_written;
             }
         }
-#endif
 
-        // timing - part 2/2
+        // timing
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
-        total_time_us += delta_us.QuadPart;
-
+        total_time_us      += delta_us.QuadPart;
+        output_write_timer += delta_us.QuadPart;
     }
 }

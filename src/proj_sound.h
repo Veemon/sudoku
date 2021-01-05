@@ -32,38 +32,39 @@ struct Sound {
 void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length);
 i32 wav_to_sound(const char* filename, Sound* sound);
 
-
-
-#define MODE_DEFAULT         0
-#define MODE_START           1
-#define MODE_SMOOTH_START    2
-#define MODE_STOP            3
-#define MODE_SMOOTH_STOP     4
+enum class EventMode {
+    default,
+    start,
+    smooth_start,
+    stop,
+    smooth_stop,
+    stop_all
+};
 
 struct Event {
-    u16 sound_id;
-    u16 layer;
-    u8  mode;
-    f32 volume;
-    f32 angle;
+    EventMode mode;
+    u16       sound_id;
+    u16       layer;
+    f32       volume;
+    f32       angle;
 };
 
 struct Status {
     // u32 id   -- might need something like this for STOP on specific events
-    u16   sound_id      = NULL;
-    u8    mode          = MODE_DEFAULT;
-    u8    layer         = 0;
-    u32   offset        = 0;
-    f32   volume        = 0.0f;
-    f32   angle         = 0.0f;
-    i64   last_write_us = 0;
-    i64   end_time_us   = 0;
+    EventMode mode          = EventMode::default;
+    u16       sound_id      = NULL;
+    u8        layer         = 0;
+    u32       offset        = 0;
+    f32       volume        = 0.0f;
+    f32       angle         = 0.0f;
+    i64       last_write_us = 0;
+    i64       end_time_us   = 0;
 };
 
 #define N_EVENTS    4
 struct RingBuffer {
     u32   ptr            = 0;
-    Event ring[N_EVENTS] = {0};
+    Event ring[N_EVENTS] = {EventMode::default};
 };
 
 void ring_push(RingBuffer* rb, Event e);
@@ -87,8 +88,8 @@ struct ThreadArgs {
 
 // FIXME
 // NOTE: smaller buffer => less latency
-#if 0
-    #define BUFFER_LEN              2048
+#if 1
+    #define BUFFER_LEN              (2048)
 #else
     #define BUFFER_LEN              (1<<16)
 #endif

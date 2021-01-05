@@ -1506,35 +1506,35 @@ void main() {
 
                 // FIXME - audio debug events
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
-                    ring_push(local_events, {SOUND_VOICE,  0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {EventMode::start, SOUND_VOICE, 0, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
 
                 if (!handled && KEY_UP(GLFW_KEY_C)) {
-                    ring_push(local_events, {SOUND_SWEEP,  0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {EventMode::start, SOUND_SWEEP, 0, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
 
                 if (!handled && KEY_UP(GLFW_KEY_V)) {
-                    ring_push(local_events, {SOUND_SIN_LOW,  0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {EventMode::start, SOUND_SIN_LOW, 0, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_B)) {                       
-                    ring_push(local_events, {SOUND_SIN_HIGH, 0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_N)) {                       
-                    ring_push(local_events, {SOUND_SIN_LOW,  0, MODE_START, 1.0f, 0.5f});
-                    ring_push(local_events, {SOUND_SIN_HIGH, 0, MODE_START, 1.0f, 0.5f});
+                    ring_push(local_events, {EventMode::start, SOUND_SIN_LOW, 0, 1.0f, 0.5f});
+                    ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 0.5f});
                     audio_updated = 1;                                      
                 }                                                           
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_M)) {                       
                     for (u32 i = 0; i < 64; i++) {
-                        ring_push(local_events, {SOUND_SIN_LOW,  0, MODE_START, 1.0f, 0.0f});
-                        ring_push(local_events, {SOUND_SIN_HIGH, 0, MODE_START, 1.0f, 1.0f});
+                        ring_push(local_events, {EventMode::start, SOUND_SIN_LOW, 0, 1.0f, 0.0f});
+                        ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 1.0f});
                     }
                     audio_updated = 1;                                      
                 }                                                           
