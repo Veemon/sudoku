@@ -7,10 +7,23 @@
 
 // system
 #include "windows.h"
-#include "dsound.h"
 
 // standard (i forgot my convention on this)
 #include "stdio.h"
+
+// FIXME -- always need this atm
+#include "dsound.h"
+
+
+#if 0
+    #define BACKEND_DIRECTSOUND
+    #include "dsound.h"
+#else
+    #define BACKEND_WASAPI
+    #include "Audioclient.h"
+    #include "Audiopolicy.h"
+    #include "Mmdeviceapi.h"
+#endif
 
 
 
@@ -91,7 +104,7 @@ struct ThreadArgs {
 #if 1
     #define BUFFER_LEN              (2048)
 #else
-    #define BUFFER_LEN              (1<<16)
+    #define BUFFER_LEN              (1<<14)
 #endif
 
 struct AudioBuffers {

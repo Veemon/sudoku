@@ -236,7 +236,7 @@ void mix_to_master() {
             buffers.layers[layer_idx][1][idx] = 0.0;
         }
         
-#if 0
+#if 1
         // get clipping values
         for (u8 c = 0; c < MASTER_CHANNELS; c++) {
             f32 mag = abs(buffers.master[c][idx]);
@@ -245,7 +245,7 @@ void mix_to_master() {
 #endif
     }
     
-#if 0
+#if 1
     // max normalization
     // -- because the buffer should be small to minimize latency,
     //    it should be fine to apply simple max-rescale over the whole buffer.
@@ -257,7 +257,7 @@ void mix_to_master() {
     }
 #endif
 
-#if 0
+#if 1
     // smooth end transition
     for (u8 c = 0; c < MASTER_CHANNELS; c++) {
         f32 avg = 0.5f * (buffers.master[c][BUFFER_LEN-1] + buffers.prev_end[c]);
@@ -268,6 +268,63 @@ void mix_to_master() {
 
 
 // -- Platform Specifics
+
+void init_wasapi() {
+    HRESULT hr;
+
+    IMMDeviceEnumerator* device_enum  = NULL;
+    IMMDevice* device                 = NULL;
+    IAudioClient* audio_client        = NULL;
+    IAudioRenderClient* render_client = NULL;
+    
+    hr = CoCreateInstance(
+           __uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, 
+           __uuidof(IMMDeviceEnumerator),
+           (void**)&device_enum);
+    DEBUG_ERROR("Failed to create device enumerator.\n");
+
+    hr = device_enum->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    DEBUG_ERROR("Failed to get default endpoint.\n");
+
+    hr = device->Activate(
+                    __uuidof(IAudioClient), CLSCTX_ALL,
+                    NULL, (void**)&audio_client);
+    DEBUG_ERROR("Failed to activate audio client.\n");
+
+    // REFERENCE_TIME is expressed in 100-nanosecond units
+    REFERENCE_TIME min_time = (i64)BUFFER_LEN * pow_10[7];
+    min_time /= OUTPUT_SAMPLE_RATE;
+    
+    WAVEFORMATEX* mix_fmt;
+    hr = audio_client->GetMixFormat(&mix_fmt);
+    DEBUG_ERROR("Failed to get mix format\n");
+
+    hr = audio_client->Initialize(
+                         AUDCLNT_SHAREMODE_SHARED,
+                         0,
+                         min_time,
+                         0,
+                         mix_fmt,
+                         NULL);
+    DEBUG_ERROR("Failed to init audio client\n");
+
+    printf("[Audio] Mix format\n");
+    printf("  -  format        %u\n", mix_fmt->wFormatTag);
+    printf("  -  channels      %u\n", mix_fmt->nChannels);
+    printf("  -  sample rate   %u\n", mix_fmt->nSamplesPerSec);
+    printf("  -  depth         %u\n", mix_fmt->wBitsPerSample);
+
+    u32 buffer_size;
+    hr = audio_client->GetBufferSize(&buffer_size);
+    DEBUG_ERROR("Failed to get buffer size\n");
+
+    printf("buffer_size: %u\n", buffer_size);
+
+    hr = audio_client->GetService(
+                         __uuidof(IAudioRenderClient),
+                         (void**)&render_client);
+    DEBUG_ERROR("Failed to get render client\n");
+}
 
 void init_directsound(HWND hwnd) {
     HRESULT hr = NULL;
@@ -329,7 +386,20 @@ void init_directsound(HWND hwnd) {
     }
 }
 
-u32 output_buffer(u32 write_offset) {
+void output_buffer_wasapi() {
+    // Grab all the available space in the shared buffer.
+    hr = pRenderClient->GetBuffer(numFramesAvailable, &pData);
+    EXIT_ON_ERROR(hr)
+
+    // Get next 1/2-second of data from the audio source.
+    hr = pMySource->LoadData(numFramesAvailable, pData, &flags);
+    EXIT_ON_ERROR(hr)
+
+    hr = pRenderClient->ReleaseBuffer(numFramesAvailable, flags);
+    EXIT_ON_ERROR(hr)
+}
+
+u32 output_buffer_directsound(u32 write_offset) {
     HRESULT hr;
 
     void* region_a       = nullptr;
@@ -394,10 +464,15 @@ u32 output_buffer(u32 write_offset) {
 
 
 
-
 void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Output Buffer\n");
+
+#ifdef BACKEND_DIRECTSOUND
     init_directsound(args->hwnd);
+#else
+    init_wasapi();
+    return;
+#endif
 
 
     printf("[Audio] Loading Sounds\n");
@@ -479,42 +554,53 @@ void audio_loop(ThreadArgs* args) {
         }
 
 
+        // FIXME -- writing every frame so we have something to time
+
+        // write sounds to layers
+        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
+            if (active_sounds[sidx].mode != EventMode::default) {
+                sound_to_layer(&active_sounds[sidx]);
+
+                // handle dead sounds
+                if (total_time_us > active_sounds[sidx].end_time_us) {
+                    active_sounds[sidx].mode = EventMode::default;
+                }
+            }
+        }
+
+        // collapse layers to master
+        mix_to_master();
+            
         if (output_write_timer >= output_time_us) {
             output_write_timer -= output_time_us;
 
-            // write sounds to layers
-            for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-                if (active_sounds[sidx].mode != EventMode::default) {
-                    sound_to_layer(&active_sounds[sidx]);
-
-                    // handle dead sounds
-                    if (total_time_us > active_sounds[sidx].end_time_us) {
-                        active_sounds[sidx].mode = EventMode::default;
-                    }
-                }
-            }
-
-            // collapse layers to master
-            mix_to_master();
-#if 0            
+#if 1            
             // FIXME - Debug info to show potential desync
             u32 write = 0;
             u32 play = 0;
             buffers.off_buffer->GetCurrentPosition((LPDWORD)&play, (LPDWORD)&write); 
             printf("off: %6u  write: %6u  play: %u\n", write_offset, write, play);
-#endif
 
+            // output
+            u32 bytes_written = output_buffer_directsound(write);
+            write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
+#else
             // output
             u32 bytes_written;
             bytes_written = output_buffer(write_offset);
             write_offset  = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
+#endif
 
             // update sound timing offsets
             u32 samples_written = bytes_written / OUTPUT_SAMPLE_BYTES;
             for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
                 if (active_sounds[sidx].mode == EventMode::default) continue;
-                active_sounds[sidx].offset += samples_written;
+                // active_sounds[sidx].offset += samples_written;
+                active_sounds[sidx].offset += output_samples;
             }
+        } else {
+            memset(&buffers.master[0][0], 0.0f, sizeof(f32) * BUFFER_LEN);
+            memset(&buffers.master[1][0], 0.0f, sizeof(f32) * BUFFER_LEN);
         }
 
         // timing
@@ -528,10 +614,12 @@ void audio_loop(ThreadArgs* args) {
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
+#if 0        
         // FIXME we literally go too fast
         if (delta_us.QuadPart < 10) {
             printf("%lld\n", delta_us.QuadPart);
         }
+#endif
 
         // FIXME - tidy this up
         // -- if we switch to PeakMessage with notify,
