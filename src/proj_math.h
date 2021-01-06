@@ -6,6 +6,7 @@
 
 // system
 #include "stdio.h"
+#include "math.h"
 
 
 #define EPS         1e-6
@@ -32,7 +33,7 @@ const u32 pow_10[] = {
 
 f32 abs(f32 x);
 f32 clip(f32 x, f32 a, f32 b);
-
+f32 sinc(f32 t);
 
 
 

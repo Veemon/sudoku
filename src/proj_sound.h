@@ -33,8 +33,8 @@ struct Sound {
     void* data;
 };
 
-void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length);
 i32 wav_to_sound(const char* filename, Sound* sound);
+void resample_sound(Sound* sound, u32 rate);
 
 enum class EventMode {
     default,
@@ -65,22 +65,13 @@ struct Status {
     i64       end_time_us   = 0;
 };
 
-#define N_EVENTS    4
+#define N_EVENTS    32
 struct RingBuffer {
     u32   ptr            = 0;
     Event ring[N_EVENTS] = {EventMode::default};
 };
 
 void ring_push(RingBuffer* rb, Event e);
-
-struct ThreadArgs {
-    HWND    hwnd      = NULL;
-    HANDLE  mutex     = NULL;
-    u8      new_event = 0;
-    RingBuffer events;
-};
-
-void audio_loop(ThreadArgs* args);
 
 
 #define N_LAYERS                1
@@ -96,19 +87,36 @@ struct AudioBuffers {
 
 void init_buffers(u64 length);
 
-
+#define BUFFER_SIZE     512
 struct WASAPI_Info {
+    u32 length         = NULL;
+    u8  started        = 0;
+    u8  floating_point = 0;
+    u16 valid_bits     = 0;
+
     IMMDeviceEnumerator* device_enum  = NULL;
     IMMDevice* device                 = NULL;
     IAudioClient* audio_client        = NULL;
     IAudioRenderClient* render_client = NULL;
 
     WAVEFORMATEX* mix_fmt;
-
-    u32 length         = NULL;
-    u8  floating_point = 0;
-    u16 valid_bits     = 0;
 };
+
+void init_wasapi(WASAPI_Info* info);
+u32 output_buffer_wasapi(WASAPI_Info* info);
+
+
+struct ThreadArgs {
+    HANDLE  mutex     = NULL;
+    u8      new_event = 0;
+    u8      init      = 0;
+    RingBuffer events;
+};
+
+
+void sound_to_layer(Status* status);
+void mix_to_master();
+void audio_loop(ThreadArgs* args);
 
 
 

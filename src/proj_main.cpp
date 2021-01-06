@@ -879,8 +879,6 @@ void main() {
         exit(-1);
     } 
 
-    HWND hwnd = glfwGetWin32Window(window);
-
     // opengl settings
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1092,7 +1090,6 @@ void main() {
 
     // audio
     ThreadArgs audio_args;
-    audio_args.hwnd  = hwnd;
     audio_args.mutex = CreateMutex(NULL, FALSE, NULL);
 
     RingBuffer  local_events_data;
@@ -1663,15 +1660,21 @@ void main() {
 
         // update audio
         if (audio_updated) {
-            u32 sig = WaitForSingleObject(audio_args.mutex,0);
-            if (sig == WAIT_OBJECT_0) {
-                printf("[Main] Copying Event Ring\n");
+            if (audio_args.init) {
+                u32 sig = WaitForSingleObject(audio_args.mutex,0);
+                if (sig == WAIT_OBJECT_0) {
+                    printf("[Main] Copying Event Ring\n");
+                    audio_updated = 0;
+
+                    memcpy(audio_events, local_events, sizeof(RingBuffer));
+                    audio_args.new_event = 1;
+                    ReleaseMutex(audio_args.mutex);
+
+                    memset(local_events, 0, sizeof(RingBuffer));
+                }
+            } else {
+                printf("[Main] Audio thread not initialized ... \n");
                 audio_updated = 0;
-
-                memcpy(audio_events, local_events, sizeof(RingBuffer));
-                audio_args.new_event = 1;
-                ReleaseMutex(audio_args.mutex);
-
                 memset(local_events, 0, sizeof(RingBuffer));
             }
         }

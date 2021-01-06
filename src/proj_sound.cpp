@@ -19,6 +19,11 @@ void init_buffers(u64 length) {
     }
 }
 
+void ring_push(RingBuffer* rb, Event e) {
+    rb->ptr = (rb->ptr+1) % N_EVENTS;
+    rb->ring[rb->ptr] = e;
+}
+
 // -- Sounds
 Sound sounds[N_SOUNDS];
 
@@ -90,11 +95,100 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     #undef BIG_16
 }
 
-// -- RingBuffer Utils
+void resample_sound(Sound* sound, u32 rate) {
+    // de-interleave data
+    f32** data = (f32**) malloc(sizeof(f32*) * sound->channels);
+    for (u8 c = 0; c < sound->channels; c++) {
+        data[c] = (f32*) malloc(sizeof(f32) * sound->length);
+    }
 
-void ring_push(RingBuffer* rb, Event e) {
-    rb->ptr = (rb->ptr+1) % N_EVENTS;
-    rb->ring[rb->ptr] = e;
+    for (u32 i = 0; i < sound->length; i++) {
+        if (sound->channels == 1) {
+            if (sound->depth == 8) {
+                i8* interp = (i8*) sound->data;
+                data[0][i] = f32(interp[i]) / (1<<7);
+                continue;
+            }
+
+            if (sound->depth == 16) {
+                i16* interp = (i16*) sound->data;
+                data[0][i]  = f32(interp[i]) / (1<<15);
+                continue;
+            }
+        }
+
+        if (sound->channels == 2) {
+            if (sound->depth == 8) {
+                i8* interp = (i8*) sound->data;
+                data[0][i] = f32(interp[(2*i)])   / (1<<7);
+                data[1][i] = f32(interp[(2*i)+1]) / (1<<7);
+                continue;
+            } 
+            
+            if (sound->depth == 16) {
+                i16* interp = (i16*) sound->data;
+                data[0][i] = f32(interp[(2*i)])   / (1<<15);
+                data[1][i] = f32(interp[(2*i)+1]) / (1<<15);
+                continue;
+            }
+        }
+    }
+
+    // allocate resampling buffers
+    f32** out = (f32**) malloc(sizeof(f32*) * sound->channels);
+    u64 length = (u64)(sound->time_us) / pow_10[6] * rate; 
+    for (u8 c = 0; c < sound->channels; c++) {
+        out[c] = (f32*) malloc(sizeof(f32) * length);
+        memset(out[c], 0, sizeof(f32) * length * sound->channels);
+    }
+
+    // FIXME: apply windowing - apply the formula over specific widths
+    // whittaker-shannon interpolation
+    f32 T = 1.0f / rate; // FIXME: i think T is the interval of time, not period
+    for (u8 c = 0; c < sound->channels; c++) {
+        for (u32 i = 0; i < length; i++) {
+            f32 t = f32(i) * T;
+            for (u32 n = 0; n < sound->length; n++) {
+                out[c][i] += data[c][n] * sinc((t - n*T)/T);
+            }
+        }
+    }
+
+    // re-interleave resampled data
+    free(sound->data);
+    sound->length = length;
+    sound->data = malloc(length * sound->channels * (sound->depth>>3));
+    for (u32 i = 0; i < sound->length; i++) {
+        if (sound->channels == 1) {
+            if (sound->depth == 8) {
+                i8* interp = (i8*) sound->data;
+                interp[i]  = i8(out[0][i] * (1<<7));
+                continue;
+            }
+
+            if (sound->depth == 16) {
+                i16* interp = (i16*) sound->data;
+                interp[i]   = i16(out[0][i] * (1<<15));
+                continue;
+            }
+        }
+
+        if (sound->channels == 2) {
+            if (sound->depth == 8) {
+                i8* interp = (i8*) sound->data;
+                interp[(2*i)]   = i8(out[0][i] * (1<<7));
+                interp[(2*i)+1] = i8(out[1][i] * (1<<7));
+                continue;
+            } 
+            
+            if (sound->depth == 16) {
+                i16* interp = (i16*) sound->data;
+                interp[(2*i)]   = i16(out[0][i] * (1<<15));
+                interp[(2*i)+1] = i16(out[1][i] * (1<<15));
+                continue;
+            }
+        }
+    }
 }
 
 
@@ -166,24 +260,26 @@ void mix_to_master() {
     for (u32 idx = 0; idx < buffers.length; idx++) {
         for (u32 layer_idx = 0; layer_idx < N_LAYERS; layer_idx++) {
             // write to master
-            buffers.master[0][idx] += buffers.layers[layer_idx][0][idx];
-            buffers.master[1][idx] += buffers.layers[layer_idx][1][idx];
+            if (layer_idx == 0) {
+                buffers.master[0][idx] = buffers.layers[layer_idx][0][idx];
+                buffers.master[1][idx] = buffers.layers[layer_idx][1][idx];
+            } else {
+                buffers.master[0][idx] += buffers.layers[layer_idx][0][idx];
+                buffers.master[1][idx] += buffers.layers[layer_idx][1][idx];
+            }
 
             // clear layer
             buffers.layers[layer_idx][0][idx] = 0.0;
             buffers.layers[layer_idx][1][idx] = 0.0;
         }
         
-#if 1
         // get clipping values
         for (u8 c = 0; c < MASTER_CHANNELS; c++) {
             f32 mag = abs(buffers.master[c][idx]);
-            if (mag > _max - EPS) _max = mag;
+            if (mag > _max - EPS) _max = mag - EPS;
         }
-#endif
     }
     
-#if 1
     // max normalization
     // -- because the buffer should be small to minimize latency,
     //    it should be fine to apply simple max-rescale over the whole buffer.
@@ -193,15 +289,12 @@ void mix_to_master() {
             buffers.master[c][i] *= _max_recip;
         }
     }
-#endif
 
-#if 1
     // smooth end transition
     for (u8 c = 0; c < MASTER_CHANNELS; c++) {
         f32 avg = 0.5f * (buffers.master[c][buffers.length-1] + buffers.prev_end[c]);
         buffers.master[c][buffers.length-1] = avg;
     }
-#endif
 }
 
 
@@ -235,14 +328,9 @@ void init_wasapi(WASAPI_Info* info) {
     }
 
     // REFERENCE_TIME is expressed in 100-nanosecond units
-    // FIXME: 2048 is just a nice buffer size. idk?
-
-#if 0
-    REFERENCE_TIME min_time = (i64)(2048) * pow_10[7];
+    // NOTE: 2048 is just a nice buffer size. idk?
+    REFERENCE_TIME min_time = (i64)(BUFFER_SIZE) * pow_10[7];
     min_time /= info->mix_fmt->nSamplesPerSec;
-#endif
-
-    REFERENCE_TIME min_time = 100000000;
 
     hr = info->audio_client->Initialize(
                          AUDCLNT_SHAREMODE_SHARED,
@@ -272,7 +360,7 @@ void init_wasapi(WASAPI_Info* info) {
     DEBUG_ERROR("Failed to get render client\n");
 }
 
-void output_buffer_wasapi(WASAPI_Info* info) {
+u32 output_buffer_wasapi(WASAPI_Info* info) {
     HRESULT hr;
 
     u32 padding;
@@ -285,31 +373,27 @@ void output_buffer_wasapi(WASAPI_Info* info) {
     hr = info->render_client->GetBuffer(open, &data);
     DEBUG_ERROR("Failed to Lock buffer\n");
 
-    // FIXME - says 32 bit???
-    /*
-    i16* interp = (i16*) data;
-    for (u32 i = 0; i < open; i++) {
-        *interp = i16(buffers.master[0][i] * (1<<15));
-         interp++;
+    if (info->floating_point) {
+        f32* interp = (f32*) data;
+        for (u32 i = 0; i < open; i++) {
+            *interp = buffers.master[0][i];
+             interp++;
 
-        *interp = i16(buffers.master[1][i] * (1<<15));
-         interp++;
-    }
-    */
-
-    i16* sound_ptr = (i16*)sounds[SOUND_SIN_HIGH].data;
-    f32* interp = (f32*) data;
-    for (u32 i = 0; i < open; i++) {
-        if (i > sounds[SOUND_SIN_HIGH].length) {
-            *interp = 0.0f;
-        } else {
-            *interp = f32(sound_ptr[i]) / (1<<15);
+            *interp = buffers.master[1][i];
+             interp++;
         }
-         interp++;
     }
 
     hr = info->render_client->ReleaseBuffer(open, NULL);
     DEBUG_ERROR("Failed to Release buffer\n");
+
+    if (!info->started) {
+        info->started = 1;
+        HRESULT hr = info->audio_client->Start();
+        DEBUG_ERROR("FAILED TO START\n");
+    }
+
+    return open;
 }
 
 
@@ -330,15 +414,16 @@ void audio_loop(ThreadArgs* args) {
         wav_to_sound("./res/voice_stereo_48khz.wav",        ptr + SOUND_VOICE);
     }
 
-    // FIXME - resample sounds to target sample_rate
-    
-    output_buffer_wasapi(&winfo);
-    HRESULT hr = winfo.audio_client->Start();
-    DEBUG_ERROR("FAILED TO START\n");
+    // resample sounds to target sample_rate
+    printf("[Audio] Resampling\n");
+    for (u16 i = 0; i < N_SOUNDS; i++) {
+        printf(" - [%u]    %u  ->  %u\n", i, sounds[i].sample_rate, winfo.mix_fmt->nSamplesPerSec);
+        resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec);
+    }
 
-    printf("[Audio] Ending\n");
-    while(1);
-    return;
+
+    // let main thread now we have initialized
+    args->init = 1;
 
 
     // timing
@@ -346,6 +431,10 @@ void audio_loop(ThreadArgs* args) {
     QueryPerformanceFrequency(&cpu_freq);
     delta_us.QuadPart = 0;
     i64 total_time_us = 0;
+
+    i64 output_time_us = (u64(winfo.length)>>1) * pow_10[6];
+    output_time_us /= winfo.mix_fmt->nSamplesPerSec;
+    i64 output_write_timer = output_time_us;
 
     // loop locals
     RingBuffer* events = &(args->events);
@@ -401,9 +490,23 @@ void audio_loop(ThreadArgs* args) {
 
         // write sounds to layers
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-            if (active_sounds[sidx].mode != EventMode::default) {
-                sound_to_layer(&active_sounds[sidx]);
+            if (active_sounds[sidx].mode == EventMode::default) continue;
+            sound_to_layer(&active_sounds[sidx]);
+        }
 
+        // collapse layers to master
+        mix_to_master();
+
+        if (output_write_timer >= output_time_us) {
+            output_write_timer -= output_time_us;
+    
+            u32 samples_written = output_buffer_wasapi(&winfo);
+
+            // update sound timing offsets
+            for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
+                if (active_sounds[sidx].mode == EventMode::default) continue;
+                active_sounds[sidx].offset += samples_written;
+                
                 // handle dead sounds
                 if (total_time_us > active_sounds[sidx].end_time_us) {
                     active_sounds[sidx].mode = EventMode::default;
@@ -411,41 +514,13 @@ void audio_loop(ThreadArgs* args) {
             }
         }
 
-        // collapse layers to master
-        mix_to_master();
-
-        //FIXME need to clear master
-         
-#if 0   
-        if (output_write_timer >= output_time_us) {
-            output_write_timer -= output_time_us;
-
-            // update sound timing offsets
-            u32 samples_written = bytes_written / OUTPUT_SAMPLE_BYTES;
-            for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
-                if (active_sounds[sidx].mode == EventMode::default) continue;
-                // active_sounds[sidx].offset += samples_written;
-                active_sounds[sidx].offset += output_samples;
-            }
-        } else {
-            memset(&buffers.master[0][0], 0.0f, sizeof(f32) * BUFFER_LEN);
-            memset(&buffers.master[1][0], 0.0f, sizeof(f32) * BUFFER_LEN);
-        }
-#endif
-
         // timing
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
-        total_time_us += delta_us.QuadPart;
-
-#if 0        
-        // FIXME we literally go too fast
-        if (delta_us.QuadPart < 10) {
-            printf("%lld\n", delta_us.QuadPart);
-        }
-#endif
+        total_time_us      += delta_us.QuadPart;
+        output_write_timer += delta_us.QuadPart;
     }
 }

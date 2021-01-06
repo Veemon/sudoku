@@ -11,6 +11,11 @@ f32 clip(f32 x, f32 a, f32 b) {
     return x;
 }
 
+f32 sinc(f32 t) {
+    f32 pi_t = PI * t;
+    return sin(pi_t) / pi_t;
+}
+
 
 void print_vec4(vec4* v) {
     printf("(  ");
