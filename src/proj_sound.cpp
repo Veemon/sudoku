@@ -1,87 +1,26 @@
 #include "proj_sound.h"
 
-
-Sound sounds[N_SOUNDS];
+// -- Buffers
 AudioBuffers buffers;
 
-// -- Sound Utils
+void init_buffers(u64 length) {
+    buffers.length = length;
 
-void graph_buffer(u16 x_samples, u16 y_samples, i16* data, u32 length) {
-    // grab range of data
-    f32 min = F32_MAX;
-    f32 max = 0.0f;
-    for (u32 i = 0; i < length; i++) {
-        if (data[i] > max) max = data[i];
-        if (data[i] < min) min = data[i];
-    }
-
-    // count the maximum number of digits on lhs of period
-    i32 max_offset = 0;
-    {
-        u8 idx = 0;
-        while((abs(max) / pow_10[idx++]) > 1.0f - 1e-8) { max_offset++; }
-    }
-
-    // descretize into x_samples chunks
-    u32  width = length / x_samples;
-    u32  bytes = x_samples * sizeof(f32);
-    f32* desc  = (f32*) malloc(bytes);
-    memset(desc, 0, bytes);
-
-#if 0
-    // averaging
-    for (u32 i = 0; i < length; i++) {
-        u32 idx = i / width;
-        if (idx > x_samples - 1) break;
-        desc[idx] += f32(data[i]);
-    }
-    for (u32 i = 0; i < x_samples; i++) {
-        desc[i] /= (f32)width;
-    }
-#else
-    // midpoints
-    u32 hw = width >> 1;
-    u32 acc = hw;
-    for (u32 i = 0; i < x_samples; i++) {
-        desc[i] = data[acc];
-        acc += hw;
-        if (acc > length - 1) break;
-    }
-#endif
-
-
-    // draw graph
-    f32 y_next;
-    f32 y_acc = max;
-    f32 y_delta = (max - min) / f32(y_samples-1);
-    for (u16 j = 0; j < y_samples; j++) {
-        // left padding
-        i32 x_offset = 0;
-        if (abs(y_acc)>10.0f-1e-8) {
-            u8 idx = 0;
-            while((abs(y_acc) / pow_10[idx++]) > 1.0f - 1e-8) { x_offset++; }
-        } else {
-            x_offset = 2;
+    // layers
+    for (u16 i = 0; i < N_LAYERS; i++) {
+        for (u8 c = 0; c < LAYER_CHANNELS; c++) {
+            buffers.layers[i][c] = (f32*) malloc(sizeof(f32) * length);
         }
-        for (u8 i = 0; i < (max_offset-x_offset); i++) { printf(" "); }
-        printf("%+8.4f |", y_acc);
-        
-        // draw samples
-        y_next = y_acc - y_delta;
-        for (u16 i = 0; i < x_samples; i++) {
-            if (desc[i] < y_acc + 1e-8 && desc[i] > y_next - 1e-8) {
-                printf("o");
-            } else {
-                printf(" ");
-            }
-        }
-        y_acc = y_next;
-        printf("\n");
     }
 
-    free(desc);
+    // master
+    for (u8 c = 0; c < MASTER_CHANNELS; c++) {
+        buffers.master[c] = (f32*) malloc(sizeof(f32) * length);
+    }
 }
 
+// -- Sounds
+Sound sounds[N_SOUNDS];
 
 i32 wav_to_sound(const char* filename, Sound* sound) {
     #define BIG_32(x)   ( (x[3]<<24) | (x[2]<<16) | (x[1]<<8) | (x[0]<<0) )
@@ -180,7 +119,7 @@ void sound_to_layer(Status* status) {
     rmod = clip(rmod, 0.0f, 1.0f);
 
     // NOTE: assumes sound is same sample rate as output device
-    for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
+    for (u32 idx = 0; idx < buffers.length; idx++) {
         i64 sample_idx = offset + idx;
         if (sample_idx > sound->length - 1) {
             return;
@@ -221,11 +160,10 @@ void sound_to_layer(Status* status) {
 }
 
 void mix_to_master() {
-    // FIXME - enable features again
     f32 _max = 1.0f;
 
     // accumulate sounds from all layers
-    for (u32 idx = 0; idx < BUFFER_LEN; idx++) {
+    for (u32 idx = 0; idx < buffers.length; idx++) {
         for (u32 layer_idx = 0; layer_idx < N_LAYERS; layer_idx++) {
             // write to master
             buffers.master[0][idx] += buffers.layers[layer_idx][0][idx];
@@ -250,7 +188,7 @@ void mix_to_master() {
     // -- because the buffer should be small to minimize latency,
     //    it should be fine to apply simple max-rescale over the whole buffer.
     f32 _max_recip = 1.0f / (_max + EPS);
-    for (u32 i = 0; i < BUFFER_LEN; i++) {
+    for (u32 i = 0; i < buffers.length; i++) {
         for (u8 c = 0; c < MASTER_CHANNELS; c++) {
             buffers.master[c][i] *= _max_recip;
         }
@@ -260,8 +198,8 @@ void mix_to_master() {
 #if 1
     // smooth end transition
     for (u8 c = 0; c < MASTER_CHANNELS; c++) {
-        f32 avg = 0.5f * (buffers.master[c][BUFFER_LEN-1] + buffers.prev_end[c]);
-        buffers.master[c][BUFFER_LEN-1] = avg;
+        f32 avg = 0.5f * (buffers.master[c][buffers.length-1] + buffers.prev_end[c]);
+        buffers.master[c][buffers.length-1] = avg;
     }
 #endif
 }
@@ -269,211 +207,118 @@ void mix_to_master() {
 
 // -- Platform Specifics
 
-void init_wasapi() {
+void init_wasapi(WASAPI_Info* info) {
     HRESULT hr;
 
-    IMMDeviceEnumerator* device_enum  = NULL;
-    IMMDevice* device                 = NULL;
-    IAudioClient* audio_client        = NULL;
-    IAudioRenderClient* render_client = NULL;
-    
     hr = CoCreateInstance(
            __uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, 
            __uuidof(IMMDeviceEnumerator),
-           (void**)&device_enum);
+           (void**)&info->device_enum);
     DEBUG_ERROR("Failed to create device enumerator.\n");
 
-    hr = device_enum->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    hr = info->device_enum->GetDefaultAudioEndpoint(eRender, eConsole, &info->device);
     DEBUG_ERROR("Failed to get default endpoint.\n");
 
-    hr = device->Activate(
+    hr = info->device->Activate(
                     __uuidof(IAudioClient), CLSCTX_ALL,
-                    NULL, (void**)&audio_client);
+                    NULL, (void**)&info->audio_client);
     DEBUG_ERROR("Failed to activate audio client.\n");
 
-    // REFERENCE_TIME is expressed in 100-nanosecond units
-    REFERENCE_TIME min_time = (i64)BUFFER_LEN * pow_10[7];
-    min_time /= OUTPUT_SAMPLE_RATE;
-    
-    WAVEFORMATEX* mix_fmt;
-    hr = audio_client->GetMixFormat(&mix_fmt);
+    hr = info->audio_client->GetMixFormat(&info->mix_fmt);
     DEBUG_ERROR("Failed to get mix format\n");
 
-    hr = audio_client->Initialize(
+    // minimum size check for EXTENSIBLE format
+    if (info->mix_fmt->cbSize >= 22) {
+        WAVEFORMATEXTENSIBLE* ext = (WAVEFORMATEXTENSIBLE*)info->mix_fmt;
+        info->valid_bits     = ext->Samples.wValidBitsPerSample; 
+        info->floating_point = ext->SubFormat.Data1 == 3;
+    }
+
+    // REFERENCE_TIME is expressed in 100-nanosecond units
+    // FIXME: 2048 is just a nice buffer size. idk?
+
+#if 0
+    REFERENCE_TIME min_time = (i64)(2048) * pow_10[7];
+    min_time /= info->mix_fmt->nSamplesPerSec;
+#endif
+
+    REFERENCE_TIME min_time = 100000000;
+
+    hr = info->audio_client->Initialize(
                          AUDCLNT_SHAREMODE_SHARED,
                          0,
                          min_time,
                          0,
-                         mix_fmt,
+                         info->mix_fmt,
                          NULL);
     DEBUG_ERROR("Failed to init audio client\n");
 
-    printf("[Audio] Mix format\n");
-    printf("  -  format        %u\n", mix_fmt->wFormatTag);
-    printf("  -  channels      %u\n", mix_fmt->nChannels);
-    printf("  -  sample rate   %u\n", mix_fmt->nSamplesPerSec);
-    printf("  -  depth         %u\n", mix_fmt->wBitsPerSample);
-
-    u32 buffer_size;
-    hr = audio_client->GetBufferSize(&buffer_size);
+    hr = info->audio_client->GetBufferSize(&info->length); // samples not bytes
     DEBUG_ERROR("Failed to get buffer size\n");
 
-    printf("buffer_size: %u\n", buffer_size);
+    printf("[Audio] Mix format\n");
+    printf("  -  format        %u\n", info->mix_fmt->wFormatTag);
+    printf("  -  channels      %u\n", info->mix_fmt->nChannels);
+    printf("  -  sample rate   %u\n", info->mix_fmt->nSamplesPerSec);
+    printf("  -  depth         %u\n", info->mix_fmt->wBitsPerSample);
+    printf("  -  length        %u\n", info->length);
+    printf("  -  cbSize        %u\n", info->mix_fmt->cbSize);
+    printf("  -  valid bits    %u\n", info->valid_bits);
+    printf("  -  floating      %u\n", info->floating_point);
 
-    hr = audio_client->GetService(
+    hr = info->audio_client->GetService(
                          __uuidof(IAudioRenderClient),
-                         (void**)&render_client);
+                         (void**)&info->render_client);
     DEBUG_ERROR("Failed to get render client\n");
 }
 
-void init_directsound(HWND hwnd) {
-    HRESULT hr = NULL;
-
-    // initialize
-    LPDIRECTSOUND direct_sound;
-
-    hr = DirectSoundCreate(0, &direct_sound, 0);
-    DEBUG_ERROR("Failed to init DirectSound\n");
-
-    hr = direct_sound->SetCooperativeLevel(hwnd, DSSCL_PRIORITY);
-    DEBUG_ERROR("Failed to set CoopLevel\n");
-
-    WAVEFORMATEX wave_fmt = {};
-    wave_fmt.wFormatTag      = WAVE_FORMAT_PCM;
-    wave_fmt.nChannels       = OUTPUT_CHANNELS;
-    wave_fmt.nSamplesPerSec  = OUTPUT_SAMPLE_RATE;
-    wave_fmt.wBitsPerSample  = OUTPUT_DEPTH;
-    wave_fmt.nBlockAlign     = OUTPUT_SAMPLE_BYTES;
-    wave_fmt.nAvgBytesPerSec = OUTPUT_SAMPLE_RATE * OUTPUT_SAMPLE_BYTES;
-    wave_fmt.cbSize          = 0;
-
-    printf("  -  format        %u\n", wave_fmt.wFormatTag);
-    printf("  -  channels      %u\n", wave_fmt.nChannels);
-    printf("  -  sample rate   %u\n", wave_fmt.nSamplesPerSec);
-    printf("  -  depth         %u\n", wave_fmt.wBitsPerSample);
-
-    {
-        DSBUFFERDESC buffer_desc;
-        memset(&buffer_desc, 0, sizeof(DSBUFFERDESC));
-
-        buffer_desc.dwSize          = sizeof(DSBUFFERDESC);
-        buffer_desc.dwFlags         = DSBCAPS_PRIMARYBUFFER;
-        buffer_desc.dwBufferBytes   = 0;
-        buffer_desc.dwReserved      = 0;
-        buffer_desc.lpwfxFormat     = NULL;
-        buffer_desc.guid3DAlgorithm = GUID_NULL;
-
-        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.main_buffer, 0);
-        DEBUG_ERROR("Failed to create main buffer\n");
-
-        hr = buffers.main_buffer->SetFormat(&wave_fmt);
-        DEBUG_ERROR("Failed to set main format\n");
-    }
-
-    {
-        DSBUFFERDESC buffer_desc;
-        memset(&buffer_desc, 0, sizeof(DSBUFFERDESC));
-
-        buffer_desc.dwSize          = sizeof(DSBUFFERDESC);
-        buffer_desc.dwFlags         = DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2;
-        buffer_desc.dwBufferBytes   = BUFFER_LEN * OUTPUT_SAMPLE_BYTES;
-        buffer_desc.dwReserved      = 0;
-        buffer_desc.lpwfxFormat     = &wave_fmt;
-        buffer_desc.guid3DAlgorithm = GUID_NULL;
-
-        hr = direct_sound->CreateSoundBuffer(&buffer_desc, &buffers.off_buffer, 0);
-        DEBUG_ERROR("Failed to create off buffer\n");
-    }
-}
-
-void output_buffer_wasapi() {
-    // Grab all the available space in the shared buffer.
-    hr = pRenderClient->GetBuffer(numFramesAvailable, &pData);
-    EXIT_ON_ERROR(hr)
-
-    // Get next 1/2-second of data from the audio source.
-    hr = pMySource->LoadData(numFramesAvailable, pData, &flags);
-    EXIT_ON_ERROR(hr)
-
-    hr = pRenderClient->ReleaseBuffer(numFramesAvailable, flags);
-    EXIT_ON_ERROR(hr)
-}
-
-u32 output_buffer_directsound(u32 write_offset) {
+void output_buffer_wasapi(WASAPI_Info* info) {
     HRESULT hr;
 
-    void* region_a       = nullptr;
-    void* region_b       = nullptr;
-    u32   region_a_bytes = 0;
-    u32   region_b_bytes = 0;
+    u32 padding;
+    hr = info->audio_client->GetCurrentPadding(&padding);
+    DEBUG_ERROR("Failed to get padding\n");
 
-    u32 write_bytes = (BUFFER_LEN>>1) * OUTPUT_SAMPLE_BYTES;
+    u32 open = info->length - padding;
 
-    hr = buffers.off_buffer->Lock(write_offset, write_bytes, 
-            &region_a, (LPDWORD)&region_a_bytes, 
-            &region_b, (LPDWORD)&region_b_bytes,
-            NULL);
-    DEBUG_ERROR("Failed to lock\n");
+    u8* data;
+    hr = info->render_client->GetBuffer(open, &data);
+    DEBUG_ERROR("Failed to Lock buffer\n");
 
-    // store end for soft transition
-    for (u8 c = 0; c < MASTER_CHANNELS; c++) {
-        buffers.prev_end[c] = buffers.master[c][BUFFER_LEN - 1];
+    // FIXME - says 32 bit???
+    /*
+    i16* interp = (i16*) data;
+    for (u32 i = 0; i < open; i++) {
+        *interp = i16(buffers.master[0][i] * (1<<15));
+         interp++;
+
+        *interp = i16(buffers.master[1][i] * (1<<15));
+         interp++;
+    }
+    */
+
+    i16* sound_ptr = (i16*)sounds[SOUND_SIN_HIGH].data;
+    f32* interp = (f32*) data;
+    for (u32 i = 0; i < open; i++) {
+        if (i > sounds[SOUND_SIN_HIGH].length) {
+            *interp = 0.0f;
+        } else {
+            *interp = f32(sound_ptr[i]) / (1<<15);
+        }
+         interp++;
     }
 
-    // write to """device"""
-    if (SUCCEEDED(hr)) { 
-        u32  a_offset = region_a_bytes / OUTPUT_SAMPLE_BYTES;
-        i16* ra       = (i16*)region_a;
-        for (u32 i = 0; i < a_offset; i++) {
-            // set output
-            *(ra++) = i16(buffers.master[0][i] * (1<<15));
-            *(ra++) = i16(buffers.master[1][i] * (1<<15));
-
-            // clear master
-            buffers.master[0][i] = 0.0;
-            buffers.master[1][i] = 0.0;
-        }
-
-
-        u32  b_offset = region_b_bytes / OUTPUT_SAMPLE_BYTES;
-        i16* rb       = (i16*)region_b;
-        for (u32 i = 0; i < b_offset; i++) {
-            // set output
-            *(rb++) = i16(buffers.master[0][a_offset+i] * (1<<15));
-            *(rb++) = i16(buffers.master[1][a_offset+i] * (1<<15));
-
-            // clear master
-            buffers.master[0][a_offset+i] = 0.0;
-            buffers.master[1][a_offset+i] = 0.0;
-        }
-
-        hr = buffers.off_buffer->Unlock(region_a, region_a_bytes, region_b, region_b_bytes);
-
-        DEBUG_ERROR("Failed to unlock\n");
-
-#if 1
-        hr = buffers.off_buffer->Play(NULL, NULL, DSBPLAY_LOOPING);
-#else
-        hr = buffers.off_buffer->Play(NULL, NULL, NULL);
-#endif
-        DEBUG_ERROR("Failed to play\n");
-    }
-
-    return region_a_bytes + region_b_bytes;
+    hr = info->render_client->ReleaseBuffer(open, NULL);
+    DEBUG_ERROR("Failed to Release buffer\n");
 }
-
 
 
 void audio_loop(ThreadArgs* args) {
     printf("[Audio] Initialising Output Buffer\n");
 
-#ifdef BACKEND_DIRECTSOUND
-    init_directsound(args->hwnd);
-#else
-    init_wasapi();
-    return;
-#endif
-
+    WASAPI_Info winfo;
+    init_wasapi(&winfo);
+    init_buffers(winfo.length);
 
     printf("[Audio] Loading Sounds\n");
     memset(&sounds[0], 0, sizeof(Sound) * N_SOUNDS);
@@ -485,6 +330,16 @@ void audio_loop(ThreadArgs* args) {
         wav_to_sound("./res/voice_stereo_48khz.wav",        ptr + SOUND_VOICE);
     }
 
+    // FIXME - resample sounds to target sample_rate
+    
+    output_buffer_wasapi(&winfo);
+    HRESULT hr = winfo.audio_client->Start();
+    DEBUG_ERROR("FAILED TO START\n");
+
+    printf("[Audio] Ending\n");
+    while(1);
+    return;
+
 
     // timing
     LARGE_INTEGER start_time, end_time, delta_us, cpu_freq;
@@ -492,22 +347,10 @@ void audio_loop(ThreadArgs* args) {
     delta_us.QuadPart = 0;
     i64 total_time_us = 0;
 
-    i64 ns_acc = 0;
-
     // loop locals
     RingBuffer* events = &(args->events);
     Status active_sounds[N_EVENTS];
     u16 active_ptr = 0; // -- active_sounds is circular
-
-    LARGE_INTEGER write_delta_us;
-    write_delta_us.QuadPart = 0;
-
-    u64 output_samples = (BUFFER_LEN >> 1);
-    u64 output_time_us = ((output_samples * pow_10[6]) / OUTPUT_SAMPLE_RATE);
-    u64 output_write_timer = output_time_us;
-
-    u32 prev_write   = 0;
-    u32 write_offset = 0; // -- essentially our write cursor
 
     printf("[Audio] Beginning Polling\n");
     while (1) {
@@ -570,26 +413,12 @@ void audio_loop(ThreadArgs* args) {
 
         // collapse layers to master
         mix_to_master();
-            
+
+        //FIXME need to clear master
+         
+#if 0   
         if (output_write_timer >= output_time_us) {
             output_write_timer -= output_time_us;
-
-#if 1            
-            // FIXME - Debug info to show potential desync
-            u32 write = 0;
-            u32 play = 0;
-            buffers.off_buffer->GetCurrentPosition((LPDWORD)&play, (LPDWORD)&write); 
-            printf("off: %6u  write: %6u  play: %u\n", write_offset, write, play);
-
-            // output
-            u32 bytes_written = output_buffer_directsound(write);
-            write_offset = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
-#else
-            // output
-            u32 bytes_written;
-            bytes_written = output_buffer(write_offset);
-            write_offset  = (write_offset + bytes_written) % (BUFFER_LEN * OUTPUT_SAMPLE_BYTES);
-#endif
 
             // update sound timing offsets
             u32 samples_written = bytes_written / OUTPUT_SAMPLE_BYTES;
@@ -602,17 +431,15 @@ void audio_loop(ThreadArgs* args) {
             memset(&buffers.master[0][0], 0.0f, sizeof(f32) * BUFFER_LEN);
             memset(&buffers.master[1][0], 0.0f, sizeof(f32) * BUFFER_LEN);
         }
+#endif
 
         // timing
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
-        LARGE_INTEGER delta_ns = delta_us;
-
-        delta_ns.QuadPart *= pow_10[9];
-        delta_ns.QuadPart /= cpu_freq.QuadPart;
-
         delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
+
+        total_time_us += delta_us.QuadPart;
 
 #if 0        
         // FIXME we literally go too fast
@@ -620,18 +447,5 @@ void audio_loop(ThreadArgs* args) {
             printf("%lld\n", delta_us.QuadPart);
         }
 #endif
-
-        // FIXME - tidy this up
-        // -- if we switch to PeakMessage with notify,
-        //    we'll most likely get better sync AND not have to worry bout
-        //    running literally faster than we can count
-        ns_acc += delta_ns.QuadPart - (delta_us.QuadPart * pow_10[3]);
-        while (ns_acc > pow_10[3] - 1) {
-            delta_us.QuadPart += 1;
-            ns_acc -= pow_10[3];
-        }
-
-        total_time_us      += delta_us.QuadPart;
-        output_write_timer += delta_us.QuadPart;
     }
 }

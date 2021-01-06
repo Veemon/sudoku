@@ -5,25 +5,16 @@
 #include "proj_types.h"
 #include "proj_math.h"
 
-// system
+// third party
 #include "windows.h"
+#include "Audioclient.h"
+#include "Audiopolicy.h"
+#include "Mmdeviceapi.h"
 
-// standard (i forgot my convention on this)
+// system
 #include "stdio.h"
 
-// FIXME -- always need this atm
-#include "dsound.h"
 
-
-#if 0
-    #define BACKEND_DIRECTSOUND
-    #include "dsound.h"
-#else
-    #define BACKEND_WASAPI
-    #include "Audioclient.h"
-    #include "Audiopolicy.h"
-    #include "Mmdeviceapi.h"
-#endif
 
 
 
@@ -89,33 +80,36 @@ struct ThreadArgs {
     RingBuffer events;
 };
 
+void audio_loop(ThreadArgs* args);
 
-#define OUTPUT_SAMPLE_RATE      48000
-#define OUTPUT_DEPTH            16
-#define OUTPUT_CHANNELS         2
-#define OUTPUT_SAMPLE_BYTES     ((OUTPUT_DEPTH >> 3) * OUTPUT_CHANNELS)
-                                
+
 #define N_LAYERS                1
 #define LAYER_CHANNELS          2
 #define MASTER_CHANNELS         2
 
-// FIXME
-// NOTE: smaller buffer => less latency
-#if 1
-    #define BUFFER_LEN              (2048)
-#else
-    #define BUFFER_LEN              (1<<14)
-#endif
-
 struct AudioBuffers {
-    f32 layers[N_LAYERS][LAYER_CHANNELS][BUFFER_LEN] = {0.0f};
-    f32 master[MASTER_CHANNELS][BUFFER_LEN]          = {0.0f};
-    f32 prev_end[MASTER_CHANNELS];
-    LPDIRECTSOUNDBUFFER main_buffer;
-    LPDIRECTSOUNDBUFFER off_buffer;
+    u64  length;
+    f32* layers[N_LAYERS][LAYER_CHANNELS];
+    f32* master[MASTER_CHANNELS];
+    f32  prev_end[MASTER_CHANNELS];
 };
 
-void audio_loop(ThreadArgs* args);
+void init_buffers(u64 length);
+
+
+struct WASAPI_Info {
+    IMMDeviceEnumerator* device_enum  = NULL;
+    IMMDevice* device                 = NULL;
+    IAudioClient* audio_client        = NULL;
+    IAudioRenderClient* render_client = NULL;
+
+    WAVEFORMATEX* mix_fmt;
+
+    u32 length         = NULL;
+    u8  floating_point = 0;
+    u16 valid_bits     = 0;
+};
+
 
 
 
