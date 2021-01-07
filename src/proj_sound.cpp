@@ -302,7 +302,7 @@ void sound_to_layer(Status* status, vec4 contrib) {
 
     // NOTE: don't need this if your sound loops seemlessly
     f32 loop_vol = 1.0;
-    const u32 loop_delta = 512;
+    const u32 loop_delta = 2048;
 
     // NOTE: assumes sound is same sample rate as output device
     for (u32 idx = 0; idx < buffers.length; idx++) {
@@ -394,17 +394,17 @@ void mix_to_master() {
         // get clipping values
         for (u8 c = 0; c < MASTER_CHANNELS; c++) {
             f32 mag = abs(buffers.master[c][idx]);
-            if (mag > _max - EPS) _max = mag - EPS;
+            if (mag + EPS > _max) _max = mag + EPS;
         }
     }
     
     // max normalization
     // -- because the buffer should be small to minimize latency,
     //    it should be fine to apply simple max-rescale over the whole buffer.
-    f32 _max_recip = 1.0f / (_max + EPS);
-    for (u32 i = 0; i < buffers.length; i++) {
-        for (u8 c = 0; c < MASTER_CHANNELS; c++) {
-            buffers.master[c][i] *= _max_recip;
+    f32 _max_recip = 1.0 / (_max + EPS);
+    for (u8 c = 0; c < MASTER_CHANNELS; c++) {
+        for (u32 i = 0; i < buffers.length; i++) {
+            buffers.master[c][i] = buffers.master[c][i] * _max_recip;
         }
     }
 
