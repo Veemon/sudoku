@@ -262,6 +262,7 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
     f32 rear_radius  = 2.30;
     f32 delta        = 0.30;
 
+    // FIXME - clipping on the boundaries
     // linearly interpolate between front and rear hemispheres
     f32 p = 1.0;
     if (angle > 1.0f && angle < 1.0f + delta)  p = (angle - 1.0) / delta; // left discontinuity
@@ -278,10 +279,11 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
 
     f32 too_rad  = 2.0 * rad;
     f32 less_rad = (1.0 / too_rad) * (front_radius / rad);
+    if (angle > 1.0f) too_rad -= front_radius;
     *l = status->volume * clip(too_rad - ldist, 0.0, too_rad) * less_rad;
     *r = status->volume * clip(too_rad - rdist, 0.0, too_rad) * less_rad;
 
-    // printf("[Audio] Left: %.4f    Right: %.4f\n", *l, *r);
+    printf("[Audio] Left: %.4f    Right: %.4f\n", *l, *r);
 
     *lr = 0;
     *rl = 0;
