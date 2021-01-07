@@ -1558,7 +1558,17 @@ void main() {
                     e.sound_id = SOUND_SIN_LOW;
                     e.volume   = 1.0f;
                     e.angle    = 0.5f;
-                    if (event.mod & GLFW_MOD_CONTROL) {
+                    if (event.mod & GLFW_MOD_SHIFT) {
+                        e.mode         = EventMode::interpolate;
+                        e.target_id    = loop_id;
+                        e.target_mode  = EventMode::loop;
+                        e.angle        = 2.0f;
+                        e.volume       = 1.0f;
+                        e.interp_time  = 8.0f;
+
+                        ring_push(local_events, e);
+
+                    } else if (event.mod & GLFW_MOD_CONTROL) {
                         angle_counter++;
 
                         // For testing angle sweeping

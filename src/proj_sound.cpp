@@ -259,8 +259,8 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
     const vec2 right_pos = { 1.0, 0.0};
 
     f32 front_radius = 1.00;
-    f32 rear_radius  = 2.00;
-    f32 delta        = 0.32;
+    f32 rear_radius  = 2.30;
+    f32 delta        = 0.30;
 
     // linearly interpolate between front and rear hemispheres
     f32 p = 1.0;
@@ -578,14 +578,29 @@ void audio_loop(ThreadArgs* args) {
                 for (u8 outer = 0; outer < 2; outer++) {
                     for (u32 i = start_args[outer]; i < end_args[outer]; i++) {
                         if (iter.mode == EventMode::default) continue;
+                        if (iter.mode == EventMode::interpolate) {
+                            for (u32 search_idx = 0; search_idx < N_EVENTS; search_idx++) {
+                                if (active_sounds[search_idx].id == iter.target_id) {
+                                    active_sounds[search_idx].interp.running      = 1;
+                                    active_sounds[search_idx].interp.start_us     = total_time_us;
+                                    active_sounds[search_idx].interp.time_us      = ((i64)(iter.interp_time * pow_10[6]));
+                                    active_sounds[search_idx].interp.delta_volume = iter.volume;
+                                    active_sounds[search_idx].interp.old_volume   = active_sounds[search_idx].volume;
+                                    active_sounds[search_idx].interp.delta_angle  = iter.angle;
+                                    active_sounds[search_idx].interp.old_angle    = active_sounds[search_idx].angle;
+                                    break;
+                                }
+                            }
+                            continue;
+                        }
                         if (iter.mode == EventMode::update) {
                             for (u32 search_idx = 0; search_idx < N_EVENTS; search_idx++) {
                                 if (active_sounds[search_idx].id == iter.target_id) {
-                                    active_sounds[search_idx].sound_id      = iter.sound_id;
-                                    active_sounds[search_idx].mode          = iter.target_mode;
-                                    active_sounds[search_idx].layer         = iter.layer;
-                                    active_sounds[search_idx].volume        = iter.volume;
-                                    active_sounds[search_idx].angle         = iter.angle;
+                                    active_sounds[search_idx].sound_id = iter.sound_id;
+                                    active_sounds[search_idx].mode     = iter.target_mode;
+                                    active_sounds[search_idx].layer    = iter.layer;
+                                    active_sounds[search_idx].volume   = iter.volume;
+                                    active_sounds[search_idx].angle    = iter.angle;
                                     break;
                                 }
                             }
@@ -620,6 +635,20 @@ void audio_loop(ThreadArgs* args) {
         }
 
 
+        // update interpolation parameters
+        for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
+            if (!active_sounds[sidx].interp.running) continue;
+            if (total_time_us - active_sounds[sidx].interp.start_us > active_sounds[sidx].interp.time_us) {
+                active_sounds[sidx].interp.running = 0;
+                active_sounds[sidx].volume = active_sounds[sidx].interp.old_volume + active_sounds[sidx].interp.delta_volume;
+                active_sounds[sidx].angle  = active_sounds[sidx].interp.old_angle  + active_sounds[sidx].interp.delta_angle;
+                continue;
+            }
+
+            f32 p = f32(total_time_us - active_sounds[sidx].interp.start_us) / active_sounds[sidx].interp.time_us;
+            active_sounds[sidx].volume = active_sounds[sidx].interp.old_volume + p * active_sounds[sidx].interp.delta_volume;
+            active_sounds[sidx].angle  = active_sounds[sidx].interp.old_angle  + p * active_sounds[sidx].interp.delta_angle;
+        }
 
         // write sounds to layers -- every frame so we have something to time
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
