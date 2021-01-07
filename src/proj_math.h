@@ -37,6 +37,17 @@ f32 sinc(f32 t);
 
 
 
+union vec2 {
+    struct {
+        f32 x;
+        f32 y;
+    };
+    f32 a[2];
+};
+
+vec2 sub(vec2 b, vec2 a);
+f32 mag(vec2 a);
+
 union vec3 {
     struct {
         f32 x;

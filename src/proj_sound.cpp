@@ -19,9 +19,18 @@ void init_buffers(u64 length) {
     }
 }
 
-void ring_push(RingBuffer* rb, Event e) {
+i32 ring_push(RingBuffer* rb, Event e) {
     rb->ptr = (rb->ptr+1) % N_EVENTS;
+    e.id = rb->id;
+    rb->id++;
+    if (rb->id < 0) rb->id = 0;
     rb->ring[rb->ptr] = e;
+    return e.id;
+}
+
+void ring_clear(RingBuffer* rb) {
+    rb->ptr = 0;
+    memset(&rb->ring[0], 0, sizeof(Event) * N_EVENTS);
 }
 
 // -- Sounds
@@ -145,6 +154,8 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
     }
 
     if (quality) {
+        printf("[Audio] sinc interpolations not yet implemented");
+#if 0
         // FIXME - not implemented correctly
         // whittaker-shannon interpolation
         f32 T = f32(BUFFER_SIZE) / rate;
@@ -158,6 +169,7 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
                 }
             }
         }
+#endif
     }
     else {
         // linear interpolation
@@ -233,62 +245,106 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
 
 
 // -- Audio Pipeline functions
-void sound_to_layer(Status* status) {
+void mono_radial_from_angle(Status* status, vec4* contrib) {
+    while (status->angle > 2.0f + EPS) status->angle -= 2.0f;
+    f32 angle = status->angle;
+
+    f32* l  = &contrib->x;
+    f32* lr = &contrib->y;
+    f32* rl = &contrib->z;
+    f32* r  = &contrib->w;
+
+    // playing sounds at the rear quieter to replicate ear facing position
+    const vec2 left_pos  = {-1.0, 0.0};
+    const vec2 right_pos = { 1.0, 0.0};
+
+    f32 front_radius = 1.00;
+    f32 rear_radius  = 2.00;
+    f32 delta        = 0.32;
+
+    // linearly interpolate between front and rear hemispheres
+    f32 p = 1.0;
+    if (angle > 1.0f && angle < 1.0f + delta)  p = (angle - 1.0) / delta; // left discontinuity
+    if (angle > 2.0f - delta)                  p = (2.0 - angle) / delta; // right discontinuity
+    rear_radius = p*rear_radius + (1.0-p)*front_radius;
+
+    f32 rad;
+    if (angle > 1.0f) rad = rear_radius;
+    else rad = front_radius;
+
+    vec2 sound_pos = {rad*(f32)cos(angle*PI), rad*(f32)sin(angle*PI)};
+    f32  ldist = mag(sub(sound_pos, left_pos));
+    f32  rdist = mag(sub(sound_pos, right_pos));
+
+    f32 too_rad  = 2.0 * rad;
+    f32 less_rad = (1.0 / too_rad) * (front_radius / rad);
+    *l = status->volume * clip(too_rad - ldist, 0.0, too_rad) * less_rad;
+    *r = status->volume * clip(too_rad - rdist, 0.0, too_rad) * less_rad;
+
+    printf("[Audio] Left: %.4f    Right: %.4f\n", *l, *r);
+
+    *lr = 0;
+    *rl = 0;
+}
+
+void stereo_radial_from_angle(Status* status, f32* l, f32* lr, f32* rl, f32* r) {
+}
+
+void sound_to_layer(Status* status, vec4 contrib) {
+    f32 l_contrib  = contrib.x;
+    f32 lr_contrib = contrib.y;
+    f32 rl_contrib = contrib.z;
+    f32 r_contrib  = contrib.w;
+
     Sound* sound = &sounds[status->sound_id];
     u16 layer    = status->layer;
     u32 offset   = status->offset;
-
-    // FIXME: assumes mono audio :(
-    // NOTE: for now applying the radial interpretation of the angle,
-    //       but there are many methods of doing positioning, and so you would
-    //       most like not want to do that here.
-    f32 lmod = status->volume;
-    f32 rmod = status->volume;
-
-    const f32 delta = 0.05; // essentially width of sound
-    lmod *= 1.0 - (status->angle - delta);
-    rmod *= status->angle + delta;
-
-    lmod = clip(lmod, 0.0f, 1.0f);
-    rmod = clip(rmod, 0.0f, 1.0f);
 
     // NOTE: assumes sound is same sample rate as output device
     for (u32 idx = 0; idx < buffers.length; idx++) {
         i64 sample_idx = offset + idx;
         if (sample_idx > sound->length - 1) {
-            return;
+            if (status->mode == EventMode::loop) {
+                status->offset = 0;
+                sample_idx -= sound->length;
+            } else {
+                return;
+            }
         }
 
         if (sound->channels == 1) {
+            f32 val = 0.0;
             if (sound->depth == 8) {
                 i8* interp = (i8*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[sample_idx]) * lmod / (1<<7);
-                buffers.layers[layer][1][idx] += f32(interp[sample_idx]) * rmod / (1<<7);
-                continue;
+                val = f32(interp[sample_idx]) / (1<<7);
             }
-
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[sample_idx]) * lmod / (1<<15);
-                buffers.layers[layer][1][idx] += f32(interp[sample_idx]) * rmod / (1<<15);
-                continue;
+                val = f32(interp[sample_idx]) / (1<<15);
             }
+
+            buffers.layers[layer][0][idx] += val * (l_contrib + lr_contrib);
+            buffers.layers[layer][1][idx] += val * (r_contrib + rl_contrib);
+            continue;
         }
 
         if (sound->channels == 2) {
+            f32 l_val = 0.0;
+            f32 r_val = 0.0;
             if (sound->depth == 8) {
                 i8* interp = (i8*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<7);
-                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<7);
-                continue;
+                l_val = f32(interp[(2*sample_idx)])   / (1<<7);
+                r_val = f32(interp[(2*sample_idx)+1]) / (1<<7);
             } 
-            
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
-                buffers.layers[layer][0][idx] += f32(interp[(2*sample_idx)])   / (1<<15);
-                buffers.layers[layer][1][idx] += f32(interp[(2*sample_idx)+1]) / (1<<15);
-                continue;
+                l_val = f32(interp[(2*sample_idx)])   / (1<<15);
+                r_val = f32(interp[(2*sample_idx)+1]) / (1<<15);
             }
+
+            buffers.layers[layer][0][idx] += l_val*l_contrib + r_val*lr_contrib;
+            buffers.layers[layer][1][idx] += r_val*r_contrib + l_val*rl_contrib;
+            continue;
         }
     }
 }
@@ -454,12 +510,14 @@ void audio_loop(ThreadArgs* args) {
         wav_to_sound("./res/voice_stereo_48khz.wav",        ptr + SOUND_VOICE);
     }
 
-    // resample sounds to target sample_rate
+    // quick resample sounds to target sample_rate
     printf("[Audio] Resampling\n");
     for (u16 i = 0; i < N_SOUNDS; i++) {
         printf(" - [%u]    %u  ->  %u\n", i, sounds[i].sample_rate, winfo.mix_fmt->nSamplesPerSec);
         resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 0);
     }
+
+    // TODO: request quality resamples from worker thread
 
 
     // let main thread now we have initialized
@@ -497,7 +555,21 @@ void audio_loop(ThreadArgs* args) {
                 u32 end_args[]   = {N_EVENTS, args->events.ptr};
                 for (u8 outer = 0; outer < 2; outer++) {
                     for (u32 i = start_args[outer]; i < end_args[outer]; i++) {
-                        if (iter.mode == EventMode::default) break;
+                        if (iter.mode == EventMode::default) continue;
+                        if (iter.mode == EventMode::update) {
+                            for (u32 search_idx = 0; search_idx < N_EVENTS; search_idx++) {
+                                if (active_sounds[search_idx].id == iter.target_id) {
+                                    active_sounds[search_idx].sound_id      = iter.sound_id;
+                                    active_sounds[search_idx].mode          = iter.target_mode;
+                                    active_sounds[search_idx].layer         = iter.layer;
+                                    active_sounds[search_idx].volume        = iter.volume;
+                                    active_sounds[search_idx].angle         = iter.angle;
+                                    break;
+                                }
+                            }
+                            continue;
+                        }
+                        active_sounds[active_ptr].id            = iter.id;
                         active_sounds[active_ptr].sound_id      = iter.sound_id;
                         active_sounds[active_ptr].mode          = iter.mode;
                         active_sounds[active_ptr].layer         = iter.layer;
@@ -526,12 +598,22 @@ void audio_loop(ThreadArgs* args) {
         }
 
 
-        // FIXME -- writing every frame so we have something to time
 
-        // write sounds to layers
+        // write sounds to layers -- every frame so we have something to time
         for (u16 sidx = 0; sidx < N_EVENTS; sidx++) {
             if (active_sounds[sidx].mode == EventMode::default) continue;
-            sound_to_layer(&active_sounds[sidx]);
+            if (active_sounds[sidx].mode == EventMode::stop) {
+                active_sounds[sidx].mode = EventMode::default;
+                continue;
+            }
+
+            Sound* sound = &sounds[0] + active_sounds[sidx].sound_id;
+            vec4 contrib;
+            if (sound->channels == 1) {
+                mono_radial_from_angle(&active_sounds[sidx], &contrib);
+            }
+
+            sound_to_layer(&active_sounds[sidx], contrib);
         }
 
         // collapse layers to master
@@ -549,7 +631,12 @@ void audio_loop(ThreadArgs* args) {
                 
                 // handle dead sounds
                 if (total_time_us > active_sounds[sidx].end_time_us) {
-                    active_sounds[sidx].mode = EventMode::default;
+                    if (active_sounds[sidx].mode == EventMode::loop) {
+                        active_sounds[sidx].end_time_us += sounds[active_sounds[sidx].sound_id].time_us;
+                    }
+                    else {
+                        active_sounds[sidx].mode = EventMode::default;
+                    }
                 }
             }
         }

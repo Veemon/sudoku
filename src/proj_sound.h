@@ -38,25 +38,30 @@ void resample_sound(Sound* sound, u32 rate);
 
 enum class EventMode {
     default,
+    update,
     start,
     smooth_start,
+    loop,
     stop,
     smooth_stop,
     stop_all
 };
 
 struct Event {
-    EventMode mode;
-    u16       sound_id;
-    u16       layer;
-    f32       volume;
-    f32       angle;
+    EventMode mode        = EventMode::default;
+    EventMode target_mode = EventMode::default;
+    i32       id          = -1;
+    i32       target_id   = -1;
+    i32       sound_id    = NULL;
+    u16       layer       = 0;
+    f32       volume      = 0.0f;
+    f32       angle       = 0.0f;
 };
 
 struct Status {
-    // u32 id   -- might need something like this for STOP on specific events
     EventMode mode          = EventMode::default;
-    u16       sound_id      = NULL;
+    i32       id            = -1;
+    i32       sound_id      = NULL;
     u8        layer         = 0;
     u32       offset        = 0;
     f32       volume        = 0.0f;
@@ -67,12 +72,13 @@ struct Status {
 
 #define N_EVENTS    32
 struct RingBuffer {
+    i32   id             = 0;
     u32   ptr            = 0;
-    Event ring[N_EVENTS] = {EventMode::default};
+    Event ring[N_EVENTS];
 };
 
-void ring_push(RingBuffer* rb, Event e);
-
+i32  ring_push(RingBuffer* rb, Event e);
+void ring_clear(RingBuffer* rb);
 
 #define N_LAYERS                1
 #define LAYER_CHANNELS          2

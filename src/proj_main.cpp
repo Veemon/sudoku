@@ -1504,35 +1504,115 @@ void main() {
 #if 1
                 // FIXME - audio debug events
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
-                    ring_push(local_events, {EventMode::start, SOUND_VOICE, 0, 1.0f, 0.5f});
-                    audio_updated = 1;                                      
+                    // To test the sound angle of stereo data
+                    Event e;
+                    e.mode     = EventMode::start;
+                    e.sound_id = SOUND_VOICE;
+                    e.layer    = 0;
+                    e.volume   = 1.0f;
+                    e.angle    = 1.0f;
+
+                    ring_push(local_events, e);
+                    audio_updated = 1;
                 }                                                           
 
                 if (!handled && KEY_UP(GLFW_KEY_C)) {
-                    ring_push(local_events, {EventMode::start, SOUND_SWEEP, 0, 1.0f, 0.5f});
-                    audio_updated = 1;                                      
+                    // For testing sound quality
+                    Event e;
+                    e.mode     = EventMode::start;
+                    e.sound_id = SOUND_SWEEP;
+                    e.layer    = 0;
+                    e.volume   = 1.0f;
+                    e.angle    = 0.5f;
+
+                    ring_push(local_events, e);
+                    audio_updated = 1;
                 }                                                           
 
-                if (!handled && KEY_UP(GLFW_KEY_V)) {
-                    ring_push(local_events, {EventMode::start, SOUND_SIN_LOW, 0, 1.0f, 0.5f});
-                    audio_updated = 1;                                      
+                if (!handled && KEY_UP(GLFW_KEY_V)) {                       
+                    // FIXME - does not work
+                    // For testing normalization and mono-angle
+                    Event e;
+                    e.mode     = EventMode::start;
+                    e.layer    = 0;
+
+                    e.sound_id = SOUND_SIN_LOW;
+                    e.volume   = 1.0f;
+                    e.angle    = 0.1f;
+                    ring_push(local_events, e);
+
+                    e.sound_id = SOUND_SIN_HIGH;
+                    e.volume   = 1.0f;
+                    e.angle    = 0.9f;
+                    ring_push(local_events, e);
+
+                    audio_updated = 1;
                 }                                                           
-                                                                            
-                if (!handled && KEY_UP(GLFW_KEY_B)) {                       
-                    ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 0.5f});
-                    audio_updated = 1;                                      
-                }                                                           
-                                                                            
-                if (!handled && KEY_UP(GLFW_KEY_N)) {                       
-                    ring_push(local_events, {EventMode::start, SOUND_SIN_LOW, 0, 1.0f, 0.5f});
-                    ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 0.5f});
-                    audio_updated = 1;                                      
-                }                                                           
+
+                const f32 delta = 0.05f;
+                static i32 loop_id = 0;
+                static i16 angle_counter = 0;
+                if (!handled && KEY_UP(GLFW_KEY_B)) {
+                    Event e;
+                    e.layer    = 0;
+                    e.sound_id = SOUND_SIN_LOW;
+                    e.volume   = 1.0f;
+                    e.angle    = 0.5f;
+                    if (event.mod & GLFW_MOD_CONTROL) {
+                        angle_counter++;
+
+                        // For testing angle sweeping
+                        e.mode         = EventMode::update;
+                        e.target_id    = loop_id;
+                        e.target_mode  = EventMode::loop;
+                        e.angle       += angle_counter * delta;
+                        ring_push(local_events, e);
+                
+                        printf("[Main] Angle: %.4f\n", angle_counter*0.1f);
+                    } else if (event.mod & GLFW_MOD_ALT) {
+                        angle_counter--;
+
+                        // For testing angle sweeping
+                        e.mode         = EventMode::update;
+                        e.target_id    = loop_id;
+                        e.target_mode  = EventMode::loop;
+                        e.angle       += angle_counter * delta;
+                        ring_push(local_events, e);
+
+                        printf("[Main] Angle: %.4f\n", angle_counter*0.1f);
+                    } else if (event.mod & GLFW_MOD_SHIFT) {
+                        // For testing ID-stopping
+                        e.mode        = EventMode::update;
+                        e.target_mode = EventMode::stop;
+                        e.target_id   = loop_id;
+                        ring_push(local_events, e);
+                    } else {
+                        // For testing looping
+                        e.mode  = EventMode::loop;
+                        loop_id = ring_push(local_events, e);
+                    }
+                    audio_updated = 1;
+                }
                                                                             
                 if (!handled && KEY_UP(GLFW_KEY_M)) {                       
-                    for (u32 i = 0; i < 64; i++) {
-                        ring_push(local_events, {EventMode::start, SOUND_SIN_LOW, 0, 1.0f, 0.0f});
-                        ring_push(local_events, {EventMode::start, SOUND_SIN_HIGH,0, 1.0f, 1.0f});
+                    Event e1;
+                    e1.mode     = EventMode::start;
+                    e1.sound_id = SOUND_SIN_LOW;
+                    e1.layer    = 0;
+                    e1.volume   = 1.0f;
+                    e1.angle    = 0.5f;
+
+                    Event e2;
+                    e2.mode     = EventMode::start;
+                    e2.sound_id = SOUND_SIN_HIGH;
+                    e2.layer    = 0;
+                    e2.volume   = 1.0f;
+                    e2.angle    = 0.5f;
+
+                    // For testing the buffer
+                    for (u32 i = 0; i < 2*N_EVENTS; i++) {
+                        ring_push(local_events, e1);
+                        ring_push(local_events, e2);
                     }
                     audio_updated = 1;                                      
                 }
@@ -1670,12 +1750,12 @@ void main() {
                     audio_args.new_event = 1;
                     ReleaseMutex(audio_args.mutex);
 
-                    memset(local_events, 0, sizeof(RingBuffer));
+                    ring_clear(local_events);
                 }
             } else {
                 printf("[Main] Audio thread not initialized ... \n");
                 audio_updated = 0;
-                memset(local_events, 0, sizeof(RingBuffer));
+                ring_clear(local_events);
             }
         }
 

@@ -1,5 +1,7 @@
 #include "proj_math.h"
 
+// -- Floating point math
+
 f32 abs(f32 x) {
     if (x > EPS) return x;
     return x * -1.0f;
@@ -16,6 +18,21 @@ f32 sinc(f32 t) {
     return sin(pi_t) / pi_t;
 }
 
+
+// -- 2 Vector
+vec2 sub(vec2 b, vec2 a) {
+    vec2 c;
+    c.x = b.x - a.x;
+    c.y = b.y - a.y;
+    return c;
+}
+
+f32 mag(vec2 a) {
+    return (f32) sqrt(a.x*a.x + a.y*a.y);
+}
+
+
+// -- 4 Vector
 
 void print_vec4(vec4* v) {
     printf("(  ");
