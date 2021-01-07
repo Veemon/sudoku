@@ -95,7 +95,7 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     #undef BIG_16
 }
 
-void resample_sound(Sound* sound, u32 rate) {
+void resample_sound(Sound* sound, u32 rate, u8 quality) {
     // de-interleave data
     f32** data = (f32**) malloc(sizeof(f32*) * sound->channels);
     for (u8 c = 0; c < sound->channels; c++) {
@@ -135,30 +135,61 @@ void resample_sound(Sound* sound, u32 rate) {
     }
 
     // allocate resampling buffers
+    // NOTE: for partically long sounds, the length will overflow
     f32** out = (f32**) malloc(sizeof(f32*) * sound->channels);
-    u64 length = (u64)(sound->time_us) / pow_10[6] * rate; 
+    u64 length = (u64)rate * sound->length / sound->sample_rate;
     for (u8 c = 0; c < sound->channels; c++) {
-        out[c] = (f32*) malloc(sizeof(f32) * length);
-        memset(out[c], 0, sizeof(f32) * length * sound->channels);
+        u32 size = sizeof(f32) * length;
+        out[c] = (f32*) malloc(size);
+        memset(out[c], 0, size);
     }
 
-    // FIXME: apply windowing - apply the formula over specific widths
-    // whittaker-shannon interpolation
-    f32 T = 1.0f / rate; // FIXME: i think T is the interval of time, not period
-    for (u8 c = 0; c < sound->channels; c++) {
-        for (u32 i = 0; i < length; i++) {
-            f32 t = f32(i) * T;
-            for (u32 n = 0; n < sound->length; n++) {
-                out[c][i] += data[c][n] * sinc((t - n*T)/T);
+    if (quality) {
+        // FIXME - not implemented correctly
+        // whittaker-shannon interpolation
+        f32 T = f32(BUFFER_SIZE) / rate;
+        for (u8 c = 0; c < sound->channels; c++) {
+            for (u32 i = 0; i < length; i++) {
+                f32 t = f32(i) * T;
+                for (u32 j = 0; j < BUFFER_SIZE; j++) {
+                    i32 n = -(i32)(BUFFER_SIZE>>1) + i + j;
+                    if (n < 0 || n > sound->length - 1) continue;
+                    out[c][i] += data[c][n] * sinc((t - n*T)/T);
+                }
+            }
+        }
+    }
+    else {
+        // linear interpolation
+        f64 time = f64(sound->time_us) / pow_10[6];
+        f64 dt_in  = time / (sound->sample_rate - 1);
+        f64 dt_out = time / (rate - 1);
+        
+        for (u8 c = 0; c < sound->channels; c++) {
+            f64 t_in   = 0.0f;
+            f64 t_out  = 0.0f;
+            u32 in_idx = 0;
+            for (u32 out_idx = 0; out_idx < length; out_idx++) {
+                while (t_out > t_in+dt_in) { in_idx++; t_in += dt_in; }
+
+                f64 next_t_in = t_in + dt_in;
+                f64 p = (next_t_in - t_out) / next_t_in;
+
+                out[c][out_idx] = (p)*data[c][in_idx];
+                if (in_idx+1 > sound->length - 1) break;
+                out[c][out_idx] += (1.0f-p)*data[c][in_idx+1];
+
+                t_out += dt_out;
             }
         }
     }
 
     // re-interleave resampled data
     free(sound->data);
-    sound->length = length;
-    sound->data = malloc(length * sound->channels * (sound->depth>>3));
-    for (u32 i = 0; i < sound->length; i++) {
+    sound->length      = length;
+    sound->sample_rate = rate;
+    sound->data        = malloc(length * sound->channels * (sound->depth>>3));
+    for (u32 i = 0; i < length; i++) {
         if (sound->channels == 1) {
             if (sound->depth == 8) {
                 i8* interp = (i8*) sound->data;
@@ -189,6 +220,15 @@ void resample_sound(Sound* sound, u32 rate) {
             }
         }
     }
+
+
+    // cleanup
+    for (u8 c = 0; c < sound->channels; c++) {
+        free(data[c]);
+        free(out[c]);
+    }
+    free(data);
+    free(out);
 }
 
 
@@ -418,7 +458,7 @@ void audio_loop(ThreadArgs* args) {
     printf("[Audio] Resampling\n");
     for (u16 i = 0; i < N_SOUNDS; i++) {
         printf(" - [%u]    %u  ->  %u\n", i, sounds[i].sample_rate, winfo.mix_fmt->nSamplesPerSec);
-        resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec);
+        resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 0);
     }
 
 
