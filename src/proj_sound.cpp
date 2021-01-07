@@ -281,7 +281,7 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
     *l = status->volume * clip(too_rad - ldist, 0.0, too_rad) * less_rad;
     *r = status->volume * clip(too_rad - rdist, 0.0, too_rad) * less_rad;
 
-    printf("[Audio] Left: %.4f    Right: %.4f\n", *l, *r);
+    // printf("[Audio] Left: %.4f    Right: %.4f\n", *l, *r);
 
     *lr = 0;
     *rl = 0;
@@ -300,17 +300,36 @@ void sound_to_layer(Status* status, vec4 contrib) {
     u16 layer    = status->layer;
     u32 offset   = status->offset;
 
+    // NOTE: don't need this if your sound loops seemlessly
+    f32 loop_vol = 1.0;
+    const u32 loop_delta = 512;
+
     // NOTE: assumes sound is same sample rate as output device
     for (u32 idx = 0; idx < buffers.length; idx++) {
         i64 sample_idx = offset + idx;
+
         if (sample_idx > sound->length - 1) {
             if (status->mode == EventMode::loop) {
-                status->offset = 0;
+                status->offset %= sound->length;
+                offset = status->offset;
                 sample_idx -= sound->length;
             } else {
                 return;
             }
         }
+
+        if (status->mode == EventMode::loop) {
+            // beginning attenuation
+            if (sample_idx < loop_delta) {
+                loop_vol = f32(sample_idx) / loop_delta;
+            }
+
+            // ending attenuation
+            if (sample_idx > sound->length - 1 - loop_delta) {
+                loop_vol = f32(sound->length - 1 - sample_idx) / loop_delta;
+            }
+        }
+
 
         if (sound->channels == 1) {
             f32 val = 0.0;
@@ -322,6 +341,7 @@ void sound_to_layer(Status* status, vec4 contrib) {
                 i16* interp = (i16*) sound->data;
                 val = f32(interp[sample_idx]) / (1<<15);
             }
+            val *= loop_vol;
 
             buffers.layers[layer][0][idx] += val * (l_contrib + lr_contrib);
             buffers.layers[layer][1][idx] += val * (r_contrib + rl_contrib);
@@ -341,6 +361,8 @@ void sound_to_layer(Status* status, vec4 contrib) {
                 l_val = f32(interp[(2*sample_idx)])   / (1<<15);
                 r_val = f32(interp[(2*sample_idx)+1]) / (1<<15);
             }
+            l_val *= loop_vol;
+            r_val *= loop_vol;
 
             buffers.layers[layer][0][idx] += l_val*l_contrib + r_val*lr_contrib;
             buffers.layers[layer][1][idx] += r_val*r_contrib + l_val*rl_contrib;

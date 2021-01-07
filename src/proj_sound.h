@@ -39,6 +39,7 @@ void resample_sound(Sound* sound, u32 rate);
 enum class EventMode {
     default,
     update,
+    interpolate, // FIXME: implement this
     start,
     smooth_start,
     loop,
@@ -56,6 +57,7 @@ struct Event {
     u16       layer       = 0;
     f32       volume      = 0.0f;
     f32       angle       = 0.0f;
+    f32       interp_time = 0.0f; // FIXME: use this to interpolate
 };
 
 struct Status {
@@ -68,6 +70,14 @@ struct Status {
     f32       angle         = 0.0f;
     i64       last_write_us = 0;
     i64       end_time_us   = 0;
+
+    // FIXME: use this
+    struct interp {
+        i64 start_time_us;
+        i64 end_time_us;
+        f32 delta_volume;
+        f32 delta_angle;
+    };
 };
 
 #define N_EVENTS    32
