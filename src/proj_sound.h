@@ -98,7 +98,6 @@ struct AudioBuffers {
     u64  length;
     f32* layers[N_LAYERS][LAYER_CHANNELS];
     f32* master[MASTER_CHANNELS];
-    f32  prev_end[MASTER_CHANNELS];
 };
 
 void init_buffers(u64 length);

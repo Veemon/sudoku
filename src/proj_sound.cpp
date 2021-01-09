@@ -153,25 +153,8 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
         memset(out[c], 0, size);
     }
 
-    if (quality) {
-        printf("[Audio] sinc interpolations not yet implemented");
-#if 0
-        // FIXME - not implemented correctly
-        // whittaker-shannon interpolation
-        f32 T = f32(BUFFER_SIZE) / rate;
-        for (u8 c = 0; c < sound->channels; c++) {
-            for (u32 i = 0; i < length; i++) {
-                f32 t = f32(i) * T;
-                for (u32 j = 0; j < BUFFER_SIZE; j++) {
-                    i32 n = -(i32)(BUFFER_SIZE>>1) + i + j;
-                    if (n < 0 || n > sound->length - 1) continue;
-                    out[c][i] += data[c][n] * sinc((t - n*T)/T);
-                }
-            }
-        }
-#endif
-    }
-    else {
+    if (quality == 0) {
+        printf("[Audio]  --  Linear Interpolation\n");
         // linear interpolation
         f64 time = f64(sound->time_us) / pow_10[6];
         f64 dt_in  = time / (sound->sample_rate - 1);
@@ -188,10 +171,70 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
                 f64 p = (next_t_in - t_out) / next_t_in;
 
                 out[c][out_idx] = (p)*data[c][in_idx];
-                if (in_idx+1 > sound->length - 1) break;
-                out[c][out_idx] += (1.0f-p)*data[c][in_idx+1];
+                if (in_idx == sound->length - 1) {
+                    f32 p3 = 2.0 * data[c][in_idx+1] - data[c][in_idx];
+                    out[c][out_idx] += (1.0-p) * p3;
+                } else {
+                    out[c][out_idx] += (1.0-p)*data[c][in_idx+1];
+                }
 
                 t_out += dt_out;
+            }
+        }
+    }
+    else if (quality == 1) {
+        printf("[Audio]  --  Cubic Interpolation\n");
+        // cubic interpolation
+        f64 time = f64(sound->time_us) / pow_10[6];
+        f64 dt_in  = time / (sound->sample_rate - 1);
+        f64 dt_out = time / (rate - 1);
+        
+        for (u8 c = 0; c < sound->channels; c++) {
+            f64 t_in   = 0.0f;
+            f64 t_out  = 0.0f;
+            u32 in_idx = 0;
+            for (u32 out_idx = 0; out_idx < length; out_idx++) {
+                while (t_out > t_in+dt_in) { in_idx++; t_in += dt_in; }
+
+                f64 next_t_in = t_in + dt_in;
+                f64 p = (next_t_in - t_out) / next_t_in;
+
+                f64 v;
+                if (in_idx == 0) {
+                    f64 p0 = 2.0 * data[c][in_idx] - data[c][in_idx+1];
+                    v = p * (3.0*(data[c][in_idx] - data[c][in_idx+1]) + data[c][in_idx+2] - p0);
+                    v = p * (p0 - 5.0*data[c][in_idx] + 4.0*data[c][in_idx+1] - data[c][in_idx+2] + v);
+                    v = p * (data[c][in_idx+1] - p0 + v) * 0.5 + data[c][in_idx];
+                } else if (in_idx == sound->length - 1) {
+                    f64 p3 = 2.0 * data[c][in_idx+1] - data[c][in_idx];
+                    v = p * (3.0*(data[c][in_idx] - data[c][in_idx+1]) + p3 - data[c][in_idx-1]);
+                    v = p * (2.0*data[c][in_idx-1] - 5.0*data[c][in_idx] + 4.0*data[c][in_idx+1] - p3 + v);
+                    v = p * (data[c][in_idx+1] - data[c][in_idx-1] + v) * 0.5 + data[c][in_idx];
+                } else {
+                    v = p * (3.0*(data[c][in_idx] - data[c][in_idx+1]) + data[c][in_idx+2] - data[c][in_idx-1]);
+                    v = p * (2.0*data[c][in_idx-1] - 5.0*data[c][in_idx] + 4.0*data[c][in_idx+1] - data[c][in_idx+2] + v);
+                    v = p * (data[c][in_idx+1] - data[c][in_idx-1] + v) * 0.5 + data[c][in_idx];
+                }
+
+                out[c][out_idx] = v;
+
+                t_out += dt_out;
+            }
+        }
+    }
+    else if (quality > 1) {
+        printf("[Audio]  --  Sinc Interpolation not implemented!!!\n");
+        // FIXME - not implemented correctly
+        // whittaker-shannon interpolation
+        f32 T = f32(BUFFER_SIZE) / rate;
+        for (u8 c = 0; c < sound->channels; c++) {
+            for (u32 i = 0; i < length; i++) {
+                f32 t = f32(i) * T;
+                for (u32 j = 0; j < BUFFER_SIZE; j++) {
+                    i32 n = -(i32)(BUFFER_SIZE>>1) + i + j;
+                    if (n < 0 || n > sound->length - 1) continue;
+                    out[c][i] += data[c][n] * sinc((t - n*T)/T);
+                }
             }
         }
     }
@@ -289,7 +332,22 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
     *rl = 0;
 }
 
-void stereo_radial_from_angle(Status* status, f32* l, f32* lr, f32* rl, f32* r) {
+void stereo_radial_from_angle(Status* status, vec4* contrib) {
+    // FIXME -- need to implement this still
+    printf("[Audio]  --  radial for stereo has not been implemented\n");
+
+    while (status->angle > 2.0f + EPS) status->angle -= 2.0f;
+    f32 angle = status->angle;
+
+    f32* l  = &contrib->x;
+    f32* lr = &contrib->y;
+    f32* rl = &contrib->z;
+    f32* r  = &contrib->w;
+
+    *l  = 1.0;
+    *lr = 0.0;
+    *rl = 0.0;
+    *r  = 1.0;
 }
 
 void sound_to_layer(Status* status, vec4 contrib) {
@@ -374,7 +432,7 @@ void sound_to_layer(Status* status, vec4 contrib) {
 }
 
 void mix_to_master() {
-    f32 _max = 1.0f;
+    f32 _max_sq = 1.0f + EPS;
 
     // accumulate sounds from all layers
     for (u32 idx = 0; idx < buffers.length; idx++) {
@@ -395,25 +453,19 @@ void mix_to_master() {
         
         // get clipping values
         for (u8 c = 0; c < MASTER_CHANNELS; c++) {
-            f32 mag = abs(buffers.master[c][idx]);
-            if (mag + EPS > _max) _max = mag + EPS;
+            f32 sq = buffers.master[c][idx] * buffers.master[c][idx];
+            if (sq + EPS > _max_sq) _max_sq = sq + EPS;
         }
     }
     
     // max normalization
     // -- because the buffer should be small to minimize latency,
     //    it should be fine to apply simple max-rescale over the whole buffer.
-    f32 _max_recip = 1.0 / (_max + EPS);
+    f32 _max_recip = 1.0 / (sqrt(_max_sq) + EPS);
     for (u8 c = 0; c < MASTER_CHANNELS; c++) {
         for (u32 i = 0; i < buffers.length; i++) {
-            buffers.master[c][i] = buffers.master[c][i] * _max_recip;
+            buffers.master[c][i] *= _max_recip;
         }
-    }
-
-    // smooth end transition
-    for (u8 c = 0; c < MASTER_CHANNELS; c++) {
-        f32 avg = 0.5f * (buffers.master[c][buffers.length-1] + buffers.prev_end[c]);
-        buffers.master[c][buffers.length-1] = avg;
     }
 }
 
@@ -538,7 +590,7 @@ void audio_loop(ThreadArgs* args) {
     printf("[Audio] Resampling\n");
     for (u16 i = 0; i < N_SOUNDS; i++) {
         printf(" - [%u]    %u  ->  %u\n", i, sounds[i].sample_rate, winfo.mix_fmt->nSamplesPerSec);
-        resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 0);
+        resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 1);
     }
 
     // TODO: request quality resamples from worker thread
@@ -662,8 +714,13 @@ void audio_loop(ThreadArgs* args) {
 
             Sound* sound = &sounds[0] + active_sounds[sidx].sound_id;
             vec4 contrib;
+
             if (sound->channels == 1) {
                 mono_radial_from_angle(&active_sounds[sidx], &contrib);
+            }
+
+            if (sound->channels == 2) {
+                stereo_radial_from_angle(&active_sounds[sidx], &contrib);
             }
 
             sound_to_layer(&active_sounds[sidx], contrib);
