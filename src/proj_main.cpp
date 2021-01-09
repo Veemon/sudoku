@@ -1562,7 +1562,7 @@ void main() {
                         e.mode         = EventMode::interpolate;
                         e.target_id    = loop_id;
                         e.target_mode  = EventMode::loop;
-                        e.angle        = 2.0f;
+                        e.angle        = 3.0f;
                         e.volume       = 0.0f;
                         e.interp_time  = 8.0f;
 

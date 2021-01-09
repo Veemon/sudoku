@@ -297,36 +297,31 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
     f32* rl = &contrib->z;
     f32* r  = &contrib->w;
 
-    // playing sounds at the rear quieter to replicate ear facing position
     const vec2 left_pos  = {-1.0, 0.0};
     const vec2 right_pos = { 1.0, 0.0};
 
-    f32 front_radius = 1.00;
-    f32 rear_radius  = 2.30;
-    f32 delta        = 0.30;
-
-    // FIXME - clipping on the boundaries
+    // playing sounds at the rear quieter to replicate ear facing position
+    f32 front_radius = 2.30;
+    f32 rear_radius  = 1.00;
+    f32 interp_delta = 0.25;
+    
     // linearly interpolate between front and rear hemispheres
     f32 p = 1.0;
-    if (angle > 1.0f && angle < 1.0f + delta)  p = (angle - 1.0) / delta; // left discontinuity
-    if (angle > 2.0f - delta)                  p = (2.0 - angle) / delta; // right discontinuity
+    if      (angle > 1.0f && angle < 1.0f + interp_delta)  p = (angle - 1.0) / interp_delta; // left discontinuity
+    else if (angle > 2.0f - interp_delta)                  p = (2.0 - angle) / interp_delta; // right discontinuity
     rear_radius = p*rear_radius + (1.0-p)*front_radius;
 
-    f32 rad;
+    f32 rad = front_radius;
     if (angle > 1.0f) rad = rear_radius;
-    else rad = front_radius;
 
     vec2 sound_pos = {rad*(f32)cos(angle*PI), rad*(f32)sin(angle*PI)};
     f32  ldist = mag(sub(sound_pos, left_pos));
     f32  rdist = mag(sub(sound_pos, right_pos));
 
-    f32 too_rad  = 2.0 * rad;
-    f32 less_rad = (1.0 / too_rad) * (front_radius / rad);
-    if (angle > 1.0f) too_rad -= front_radius;
-    *l = status->volume * clip(too_rad - ldist, 0.0, too_rad) * less_rad;
-    *r = status->volume * clip(too_rad - rdist, 0.0, too_rad) * less_rad;
-
-    printf("[Audio] Left: %.4f    Right: %.4f\n", *l, *r);
+    // interpret distances to volumes
+    f32 rad2_recip = 1.0f / (2.0f * rad);
+    *l = status->volume * (1.0f - (ldist * rad2_recip));
+    *r = status->volume * (1.0f - (rdist * rad2_recip));
 
     *lr = 0;
     *rl = 0;
@@ -361,13 +356,17 @@ void sound_to_layer(Status* status, vec4 contrib) {
     u32 offset   = status->offset;
 
     // NOTE: don't need this if your sound loops seemlessly
+    //       so really you'd want this to be an argument to the function.
+    const u32 loop_atten = 1 << 13; // attenuation zone
+    const u32 loop_dead  = 1 <<  9; // dead zone
+
     f32 loop_vol = 1.0;
-    const u32 loop_delta = 2048;
 
     // NOTE: assumes sound is same sample rate as output device
     for (u32 idx = 0; idx < buffers.length; idx++) {
         i64 sample_idx = offset + idx;
 
+        // handle wrapping
         if (sample_idx > sound->length - 1) {
             if (status->mode == EventMode::loop) {
                 status->offset %= sound->length;
@@ -378,18 +377,23 @@ void sound_to_layer(Status* status, vec4 contrib) {
             }
         }
 
+        // loop smooth volume attenuation
         if (status->mode == EventMode::loop) {
+            // loop dead zone
+            if (sample_idx < loop_dead || sample_idx > sound->length - 1 - loop_dead) {
+                loop_vol = 0.0f;
+            }
+
             // beginning attenuation
-            if (sample_idx < loop_delta) {
-                loop_vol = f32(sample_idx) / loop_delta;
+            else if (sample_idx < loop_dead + loop_atten) {
+                loop_vol = f32(sample_idx - loop_dead) / loop_atten;
             }
 
             // ending attenuation
-            if (sample_idx > sound->length - 1 - loop_delta) {
-                loop_vol = f32(sound->length - 1 - sample_idx) / loop_delta;
+            else if (sample_idx > sound->length - 1 - loop_atten - loop_dead) {
+                loop_vol = f32(sound->length - 1 - sample_idx - loop_dead) / loop_atten;
             }
         }
-
 
         if (sound->channels == 1) {
             f32 val = 0.0;
