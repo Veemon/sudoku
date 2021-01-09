@@ -11,13 +11,15 @@ Extend the solver to perform graph traversals
 
 Fix the AI cursor
 
-Fix mouse cursor on non-square resolutions
-
-Update mouse cursor on board to just remove itself after draw, like the AI cursor does
+Update mouse cursor 'hover' on board to just remove itself after draw, like the AI cursor does
 
 Make solver traverse board more human like instead of left->right, top->bottom
 
 Fix Segfaults / Crashes
+
+XXX
+------------------------------
+Fix mouse cursor on non-square resolutions
 
 */
 
@@ -33,10 +35,8 @@ Fix Segfaults / Crashes
 #undef near
 #undef far
 
-#define GLFW_EXPOSE_NATIVE_WIN32
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
-#include "GLFW/glfw3native.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -491,7 +491,7 @@ implement tree search for something like this,
 u8 make_progress(u16* board, u32 base_x, u32 base_y, u8 stage) {
     u8 state_change = PROGRESS_DEFAULT;
 
-    // skip statics and already set cells
+    // skip statics and alreratio_dy set cells
     u32 base_idx = IDX(base_x, base_y);
     {
         bool cell_static = board[base_idx] & BOARD_FLAG_STATIC;
@@ -806,7 +806,7 @@ void generate_puzzle(u16* board) {
         u32 rnd_y = rand() % 9;
         u32 idx = IDX(rnd_x, rnd_y);
 
-        // save, and skip if already hidden
+        // save, and skip if alreratio_dy hidden
         u16 tmp = board[idx];
         board[idx] = BOARD_EMPTY;
         if (board[idx] == tmp) continue;
@@ -896,7 +896,7 @@ void main() {
 	glfwSetScrollCallback(window, scroll_callback);
 	glfwSetKeyCallback(window, key_callback);
 
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+    //glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN); FIXME
 
     if (!gladLoadGL()) {
         fprintf(stderr, "Failed to initialize OpenGL loader!\n");
@@ -1136,7 +1136,7 @@ void main() {
     u8 hover_idx = 0xFF;
 
     f32 x_ratio = 1.0f, y_ratio = 1.0f;
-    f32 adx     = 0.0f, ady     = 0.0f;
+    f32 ratio_dx     = 0.0f, ratio_dy     = 0.0f;
 
 
     // audio thread sync
@@ -1182,14 +1182,18 @@ void main() {
             x_ratio = f32(window_width) / f32(window_height);
             y_ratio = f32(window_height) / f32(window_width);
 
-            if (window_width > window_height) {
-                adx = (x_ratio - 1) / 2.0f;
+            if (window_width >= window_height) {
+                ratio_dx = x_ratio - 1.0f;
+                ratio_dy = 0.0f;
+
                 project_orthographic(&proj, -x_ratio, x_ratio, -1.0f, 1.0f, 0.0f, 100.0f);
                 scale_mat4(&scale_mouse, {x_ratio, 1.0, 1.0});
             }
 
             if (window_height > window_width) {
-                ady = (y_ratio - 1) / 2.0f;
+                ratio_dx = 0.0f;
+                ratio_dy = y_ratio - 1.0f;
+
                 project_orthographic(&proj, -1.0f, 1.0f, -y_ratio, y_ratio, 0.0f, 100.0f);
                 scale_mat4(&scale_mouse, {1.0, y_ratio, 1.0});
             }
@@ -1214,19 +1218,18 @@ void main() {
             f32 screen_x = event.mouse_position[0] / window_width;
             f32 screen_y = event.mouse_position[1] / window_height;
 
-            // FIXME: broken when window not square
-            // mouse coords [0,1] -> [0, 1 + ratio]
-            mouse_x = screen_x * (1.0f + adx);
-            mouse_y = screen_y * (1.0f + ady);
+            // mouse coords [0,1] -> [0, 1 + ratio_delta]
+            mouse_x = screen_x * (1.0f + ratio_dx);
+            mouse_y = screen_y * (1.0f + ratio_dy);
 
             // mouse coords [0,1] -> [-ratio_delta, 1 + ratio_delta]
-            screen_x = screen_x*(1.0f + adx + adx) - adx;
-            screen_y = screen_y*(1.0f + ady + ady) - ady;
+            screen_x = screen_x*(1.0f + ratio_dx) - (ratio_dx/2.0f);
+            screen_y = screen_y*(1.0f + ratio_dy) - (ratio_dy/2.0f);
 
             // remap coords to account for board scale
             f32 d = 0.5 * (1.0f - target_scale);
-            screen_x = screen_x*(1.0f+d+d) - d; 
-            screen_y = screen_y*(1.0f+d+d) - d; 
+            screen_x = screen_x*(1.0f + d + d) - d; 
+            screen_y = screen_y*(1.0f + d + d) - d; 
 
             // clear current hover
             if (hover_idx < 0xFF) { 
@@ -1236,17 +1239,19 @@ void main() {
             }
 
             // get hover with deadband
-            if (screen_x < 1.0f && screen_y < 1.0f) {
+            if (screen_x > 0.0f - EPS && screen_y > 0.0f - EPS && 
+                screen_x < 1.0f + EPS && screen_y < 1.0f + EPS) {
                 const f32 gamma = 0.1f * (1.0f/9.0f);
 
                 f32 xn = screen_x * 9.0f;
                 i8  xi = i8(xn);
-                f32 dx  = xn - f32(xi);
+                f32 dx = xn - f32(xi);
 
                 f32 yn = screen_y * 9.0f;
                 i8  yi = i8(yn);
-                f32 dy  = yn - f32(yi);
+                f32 dy = yn - f32(yi);
 
+                // FIXME: just store it, add it before render and then remove it
                 // NOTE: operates as an override of previous node in history
                 if (gamma < dx && dx < 1.0f - gamma) {
                     if (gamma < dy && dy < 1.0f - gamma) {
