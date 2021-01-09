@@ -1135,8 +1135,8 @@ void main() {
     i8 mouse_target_y;
     u8 hover_idx = 0xFF;
 
-    f32 x_ratio = 1.0f, y_ratio = 1.0f;
-    f32 ratio_dx     = 0.0f, ratio_dy     = 0.0f;
+    f32 x_ratio  = 1.0f, y_ratio  = 1.0f;
+    f32 ratio_dx = 0.0f, ratio_dy = 0.0f;
 
 
     // audio thread sync
