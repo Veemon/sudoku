@@ -1,3 +1,27 @@
+/*
+TODO
+------------------------------
+Add sound events
+
+Handle sound variations
+    u8 variations[N_SOUNDS];
+    variations[sound_id] = variations[sound_id] % N_SOUND_X_VARIATIONS
+
+Extend the solver to perform graph traversals
+
+Fix the AI cursor
+
+Fix mouse cursor on non-square resolutions
+
+Update mouse cursor on board to just remove itself after draw, like the AI cursor does
+
+Make solver traverse board more human like instead of left->right, top->bottom
+
+Fix Segfaults / Crashes
+
+*/
+
+
 // local
 #include "proj_types.h"
 #include "proj_math.h"
@@ -1530,7 +1554,6 @@ void main() {
                 }                                                           
 
                 if (!handled && KEY_UP(GLFW_KEY_V)) {                       
-                    // FIXME - does not work
                     // For testing normalization and mono-angle
                     Event e;
                     e.mode     = EventMode::start;
@@ -1825,7 +1848,7 @@ void main() {
 
         total_time_ms   += delta_ms.QuadPart;
         render_timer_ms += delta_ms.QuadPart;
-        solve_timer_ms  += delta_ms.QuadPart; // FIXME: switch all of these to MS counter-part
+        solve_timer_ms  += delta_ms.QuadPart;
 
         total_time = f64(total_time_ms) / 1000.0;
     }
