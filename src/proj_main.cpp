@@ -1278,10 +1278,6 @@ void main() {
     u16 board_iterations   = 0;
     u16 stagnation_counter = 0xFFFF; 
 
-    
-    u8 use_solving_time = 0;
-    u8 solving_time_xd = 0; // FIXME - delete this
-
     while (!glfwWindowShouldClose(window))
     {
         // state reset
@@ -1409,11 +1405,6 @@ void main() {
                     handled = 1;
                 }
 
-                if (!handled && KEY_UP(GLFW_KEY_X)) {
-                    solving_time_xd = 1;
-                    handled = 1;
-                }
-
                 // check - solve
                 if (!handled && KEY_UP(GLFW_KEY_ENTER)) {
                     // check if there's statics
@@ -1440,19 +1431,11 @@ void main() {
                     }
                     handled = 1;
                 } 
-// FIXME - need to rethink this with KEY_UP and KEY_DOWN
-#if 0
                 else if (!handled && waiting_for_solve) {
                     // didn't press enter, then if were currently solving we should stop
-                    // FIXME: even though we clear it here, it somehow isn't cleared at render time?
                     waiting_for_solve = false;
-                    // for (u32 j = 0; j < 9; j++) {
-                    //     for (u32 i = 0; i < 9; i++) {
-                    //         board_data[IDX(i,j)] &= ~BOARD_FLAG_AI;
-                    //     }
-                    // }
+                    ai_cursor_idx = 0xff;
                 }
-#endif
 
                 // board clear
                 if (KEY_UP(GLFW_KEY_BACKSPACE)) {
@@ -1819,12 +1802,7 @@ void main() {
         // FIXME: crashes on board full of statics
         // make solution progress
         if (waiting_for_solve) {
-//             if (solve_timer_ms >= solve_wait_ms) {
-//                 solve_timer_ms -= solve_wait_ms;
-
-            // FIXME
-            if (use_solving_time && solving_time_xd || solve_timer_ms >= solve_wait_ms) {
-                solving_time_xd = 0;
+            if (solve_timer_ms >= solve_wait_ms) {
                 solve_timer_ms -= solve_wait_ms;
 
                 u8 status = PROGRESS_INV_CELL; 
@@ -1870,7 +1848,6 @@ void main() {
                     // nothing set, retry again next iteration
                     if (status == PROGRESS_DEFAULT) {
                         solve_timer_ms = solve_wait_ms;
-                        solving_time_xd = 1;
                     }
 
                     if (status == PROGRESS_INV_CELL) { stage = 0; ai_logic_idx++; }
