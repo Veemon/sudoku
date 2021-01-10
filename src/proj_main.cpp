@@ -7,6 +7,9 @@ Handle sound variations in proj_main
     u8 variations[N_SOUNDS];
     variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
 
+Make the solver smarter
+ - for example, if u see theres only 1 place for a penciled number in the [square,row,col], ink it
+
 Extend the solver to perform graph traversals
 
 Fix Segfaults / Crashes
@@ -543,7 +546,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
 #define N_PATTERNS              4
 
 u8 pattern_idx = 0;
-u8 patterns[2][81][2];
+u8 patterns[N_PATTERNS][81][2];
 
 void debug_pattern(u8 pattern_id) {
     u8 quit = 0;
@@ -1162,14 +1165,14 @@ void main() {
         
         c = 9;
         while (n < 81) {
-            for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_OUTER); BREAK; } BREAK; // left
+            /* left */ for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_OUTER); BREAK; } BREAK;
             c--;       
 
-            for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_OUTER); } // down
-            for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_OUTER); } // right
+            /*  down */ for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_OUTER); }
+            /* right */ for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_OUTER); }
             c--;
 
-            for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_OUTER); } // up
+            /* up */ for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_OUTER); }
         }
 
         #undef BREAK
@@ -1194,15 +1197,14 @@ void main() {
         dir = 1;
         for (u8 x = 0; x < 9; x++) {
             for (u8 y = 0; y < 9; y++) {
-                patterns[PATTERN_ROW_SNAKE][n][0] = x;
-                if (!dir) patterns[PATTERN_ROW_SNAKE][n][1] = y;
-                else      patterns[PATTERN_ROW_SNAKE][n][1] = 8 - y;
+                patterns[PATTERN_COL_SNAKE][n][0] = x;
+                if (!dir) patterns[PATTERN_COL_SNAKE][n][1] = y;
+                else      patterns[PATTERN_COL_SNAKE][n][1] = 8 - y;
                 n++;
             }
             dir = (dir+1)%2;
         }
     }
-
 
 
     // timing
@@ -1842,7 +1844,7 @@ void main() {
 
                     // speed up over time
                     if (status == PROGRESS_SET_CELL) {
-                        solve_wait_ms *= 0.92f;
+                        solve_wait_ms *= 0.90f;
                     }
 
                     // nothing set, retry again next iteration
