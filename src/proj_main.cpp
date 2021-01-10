@@ -1210,15 +1210,21 @@ void main() {
     QueryPerformanceFrequency(&cpu_freq);
     delta_ms.QuadPart = 0;
 
+    QueryPerformanceCounter(&start_time);
+    srand(start_time.QuadPart);
+
     i64 total_time_ms = 0;
     f32 total_time    = 0.0f;
 
-    i64 solve_true_ms  = 60;
+    i64 solve_true_ms  = 30;
     i64 solve_wait_ms  = solve_true_ms;
     i64 solve_timer_ms = solve_wait_ms;
 
     i64 render_wait_ms  = 1000 / monitor_rate;
     i64 render_timer_ms = render_wait_ms;
+
+
+
 
 
     // audio
@@ -1874,7 +1880,10 @@ void main() {
                         if (stage  > 2) { stage  = 0; ai_logic_idx++; }
                     }
                     if (ai_logic_idx > 81) { 
+                        u8 tmp = pattern_idx;
                         pattern_idx = rand() % N_PATTERNS; 
+                        if (pattern_idx == tmp) pattern_idx = (pattern_idx+1) % N_PATTERNS;
+
                         ai_logic_idx = 0; 
                         board_iterations++; 
                     }
