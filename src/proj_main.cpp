@@ -3,17 +3,11 @@ TODO
 ------------------------------
 Add sound events
 
-Handle sound variations
+Handle sound variations in proj_main
     u8 variations[N_SOUNDS];
-    variations[sound_id] = variations[sound_id] % N_SOUND_X_VARIATIONS
+    variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
 
 Extend the solver to perform graph traversals
-
-Fix the AI cursor
-
-Update mouse cursor 'hover' on board to just remove itself after draw, like the AI cursor does
-
-Make solver traverse board more human like instead of left->right, top->bottom
 
 Fix Segfaults / Crashes
 
@@ -21,6 +15,11 @@ XXX
 ------------------------------
 Fix mouse cursor on non-square resolutions
 
+Update mouse cursor 'hover' on board to just remove itself after draw, like the AI cursor does
+
+Fix the AI cursor
+
+Make the solving pattern more aesthetic
 */
 
 
@@ -294,7 +293,6 @@ struct ListItem {
     u8 type = LIST_NULL;
     i8 cursor_x;
     i8 cursor_y;
-    u32 hover_idx;
     u16* board_data;
     ListItem* next;
     ListItem* prev;
@@ -488,10 +486,10 @@ implement tree search for something like this,
 000702000
 000008006
 */
-u8 make_progress(u16* board, u32 base_x, u32 base_y, u8 stage) {
+u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
     u8 state_change = PROGRESS_DEFAULT;
 
-    // skip statics and alreratio_dy set cells
+    // skip statics and already set cells
     u32 base_idx = IDX(base_x, base_y);
     {
         bool cell_static = board[base_idx] & BOARD_FLAG_STATIC;
@@ -537,8 +535,40 @@ u8 make_progress(u16* board, u32 base_x, u32 base_y, u8 stage) {
 
 
 
+#define PATTERN_SPIRAL_INNER    0
+#define PATTERN_SPIRAL_OUTER    1
+#define PATTERN_ROW_SNAKE       2
+#define PATTERN_COL_SNAKE       3
 
+#define N_PATTERNS              4
 
+u8 pattern_idx = 0;
+u8 patterns[2][81][2];
+
+void debug_pattern(u8 pattern_id) {
+    u8 quit = 0;
+    u8 debug[81] = {};
+    for (u8 i = 0; i < 81; i++) {
+        u8 x = patterns[pattern_id][i][0];
+        u8 y = patterns[pattern_id][i][1];
+        if (x > 8 || y > 8) {
+            printf("idx:  %u    x: %u  y: %u\n", i,x,y);
+            quit = 1;
+        } else {
+            debug[(9*y) + x] = 1;
+        }
+    }
+    if (quit) return;
+    printf("\n");
+    for (u8 x = 0; x < 9; x++) {
+        for (u8 y = 0; y < 9; y++) {
+            if (debug[(9*y) + x]) printf("X ");
+            else                 printf("- ");
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
 
 
 
@@ -796,7 +826,8 @@ void generate_puzzle(u16* board) {
         printf("\n");\
     }
 
-    
+    u8 pattern_idx = rand() % N_PATTERNS;
+
     u32  hidden[81] = {0};
     u8   hidden_idx = 0;
     u32  fails = 0;
@@ -806,7 +837,7 @@ void generate_puzzle(u16* board) {
         u32 rnd_y = rand() % 9;
         u32 idx = IDX(rnd_x, rnd_y);
 
-        // save, and skip if alreratio_dy hidden
+        // save, and skip if already hidden
         u16 tmp = board[idx];
         board[idx] = BOARD_EMPTY;
         if (board[idx] == tmp) continue;
@@ -814,13 +845,13 @@ void generate_puzzle(u16* board) {
         u8 solved = 0;
         set_pencils(board);
         for (u32 n = 0; n < N; n++) {
-            // - solve
-            for (u32 y = 0; y < 9; y++) {
-                for (u32 x = 0; x < 9; x++) {
-                    for (u32 s = 0; s < 3; s++) {
-                        u8 status = make_progress(board, x, y, s);
-                        if (status == PROGRESS_INV_CELL) break; 
-                    }
+            // - solve with patterns
+            for (u8 i = 0; i < 81; i++) {
+                u8 x = patterns[pattern_idx][i][0];
+                u8 y = patterns[pattern_idx][i][1];
+                for (u32 s = 0; s < 3; s++) {
+                    u8 status = make_progress(board, x, y, s);
+                    if (status == PROGRESS_INV_CELL) break; 
                 }
             }
 
@@ -833,6 +864,8 @@ void generate_puzzle(u16* board) {
                 break;
             } 
         }
+
+        pattern_idx = rand() % N_PATTERNS;
 
         // rehide tiles
         for (u8 i = 0; i < hidden_idx; i++) {
@@ -896,7 +929,7 @@ void main() {
 	glfwSetScrollCallback(window, scroll_callback);
 	glfwSetKeyCallback(window, key_callback);
 
-    //glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN); FIXME
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
     if (!gladLoadGL()) {
         fprintf(stderr, "Failed to initialize OpenGL loader!\n");
@@ -1043,6 +1076,13 @@ void main() {
 
 
     // shaders: TODO abstract shader program?
+    /*
+       struct Shader {
+            GLuint    program;
+            HashTable uniforms;
+       };
+    */
+
     #define PATH_SHADER_MAIN_VERT "./shaders/main.vert"
     #define PATH_SHADER_MAIN_FRAG "./shaders/main.frag"
 
@@ -1096,6 +1136,74 @@ void main() {
     mat4 scale_mouse;
     identity(&scale_mouse);
 
+    
+    // pre-compute pattern traversal arrays
+    {
+        #define BREAK  if (n > 80) break
+        #define SET(i) patterns[i][n][0] = x; patterns[i][n][1] = y; n++
+
+        // INNER SPIRAL --------
+        u8 n = 0, x = 4, y = 4;
+        SET(PATTERN_SPIRAL_INNER);
+        
+        u8 c = 1;
+        while (n < 81) {
+            /*  up  */ for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_INNER); BREAK; } BREAK;
+            /* left */ for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_INNER); }
+            c++;                                      
+                                                      
+            /*  down */ for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_INNER); }
+            /* right */ for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_INNER); }
+            c++;
+        }
+
+        // OUTER SPIRAL --------
+        n = 0, x = 9, y = 0;
+        
+        c = 9;
+        while (n < 81) {
+            for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_OUTER); BREAK; } BREAK; // left
+            c--;       
+
+            for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_OUTER); } // down
+            for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_OUTER); } // right
+            c--;
+
+            for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_OUTER); } // up
+        }
+
+        #undef BREAK
+        #undef SET
+    }
+    {
+        // ROW SNAKE -----
+        u8 n = 0;
+        u8 dir = 0;
+        for (u8 y = 0; y < 9; y++) {
+            for (u8 x = 0; x < 9; x++) {
+                if (!dir) patterns[PATTERN_ROW_SNAKE][n][0] = x;
+                else      patterns[PATTERN_ROW_SNAKE][n][0] = 8 - x;
+                patterns[PATTERN_ROW_SNAKE][n][1] = y;
+                n++;
+            }
+            dir = (dir+1)%2;
+        }
+
+        // COL SNAKE -----
+        n = 0;
+        dir = 1;
+        for (u8 x = 0; x < 9; x++) {
+            for (u8 y = 0; y < 9; y++) {
+                patterns[PATTERN_ROW_SNAKE][n][0] = x;
+                if (!dir) patterns[PATTERN_ROW_SNAKE][n][1] = y;
+                else      patterns[PATTERN_ROW_SNAKE][n][1] = 8 - y;
+                n++;
+            }
+            dir = (dir+1)%2;
+        }
+    }
+
+
 
     // timing
     LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
@@ -1105,7 +1213,8 @@ void main() {
     i64 total_time_ms = 0;
     f32 total_time    = 0.0f;
 
-    i64 solve_wait_ms  = 25;
+    i64 solve_true_ms  = 60;
+    i64 solve_wait_ms  = solve_true_ms;
     i64 solve_timer_ms = solve_wait_ms;
 
     i64 render_wait_ms  = 1000 / monitor_rate;
@@ -1154,14 +1263,18 @@ void main() {
     u32 cursor_idx = IDX(cursor_x, cursor_y);
     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
 
-    bool waiting_for_solution = false;
+    bool waiting_for_solve = false;
 
-    u32 base_x = 0, clear_x = 0xff;
-    u32 base_y = 0, clear_y = 0xff;
-    u8  stage  = 0;
+    u32 ai_logic_idx  = 0;
+    u32 ai_cursor_idx = 0xff;
+    u8  stage         = 0;
 
     u16 board_iterations   = 0;
     u16 stagnation_counter = 0xFFFF; 
+
+    
+    u8 use_solving_time = 0;
+    u8 solving_time_xd = 0; // FIXME - delete this
 
     while (!glfwWindowShouldClose(window))
     {
@@ -1231,14 +1344,8 @@ void main() {
             screen_x = screen_x*(1.0f + d + d) - d; 
             screen_y = screen_y*(1.0f + d + d) - d; 
 
-            // clear current hover
-            if (hover_idx < 0xFF) { 
-                // NOTE: instead of saving this to a new history node, override the previous node
-                history_ptr->prev->board_data[hover_idx] &= ~BOARD_FLAG_HOVER; 
-                hover_idx = 0xFF;
-            }
-
             // get hover with deadband
+            hover_idx = 0xFF;
             if (screen_x > 0.0f - EPS && screen_y > 0.0f - EPS && 
                 screen_x < 1.0f + EPS && screen_y < 1.0f + EPS) {
                 const f32 gamma = 0.1f * (1.0f/9.0f);
@@ -1251,15 +1358,11 @@ void main() {
                 i8  yi = i8(yn);
                 f32 dy = yn - f32(yi);
 
-                // FIXME: just store it, add it before render and then remove it
-                // NOTE: operates as an override of previous node in history
                 if (gamma < dx && dx < 1.0f - gamma) {
                     if (gamma < dy && dy < 1.0f - gamma) {
                         mouse_target_x = xi;
                         mouse_target_y = yi;
                         hover_idx = IDX(mouse_target_x, mouse_target_y);
-                        history_ptr->prev->board_data[hover_idx] |= BOARD_FLAG_HOVER; 
-                        history_ptr->prev->hover_idx = hover_idx;
                     }
                 }
 
@@ -1300,25 +1403,30 @@ void main() {
                     handled = 1;
                 }
 
+                if (!handled && KEY_UP(GLFW_KEY_X)) {
+                    solving_time_xd = 1;
+                    handled = 1;
+                }
+
                 // check - solve
-                if (KEY_UP(GLFW_KEY_ENTER)) {
+                if (!handled && KEY_UP(GLFW_KEY_ENTER)) {
                     // check if there's statics
-                    if (!waiting_for_solution) {
+                    if (!waiting_for_solve) {
                         for (u8 j = 0; j < 9; j++) {
                             for (u8 i = 0; i < 9; i++) {
                                 if (board_data[IDX(i,j)] & BOARD_FLAG_STATIC) {
-                                    solve_timer_ms       = solve_wait_ms;
-                                    waiting_for_solution = true;
-                                    base_x               = 0;
-                                    base_y               = 0;
-                                    clear_x              = 0xff;
-                                    clear_y              = 0xff;
-                                    board_iterations     = 0;
-                                    board_input          = 1;
+                                    waiting_for_solve = true;
                                     break;
                                 }
                             }
-                            if (waiting_for_solution) {
+                            if (waiting_for_solve) {
+                                solve_wait_ms = solve_true_ms;
+
+                                ai_logic_idx     = 0;
+                                ai_cursor_idx    = 0xff;
+                                board_iterations = 0;
+                                board_input      = 1;
+
                                 set_pencils(board_data);
                                 break;
                             }
@@ -1326,18 +1434,19 @@ void main() {
                     }
                     handled = 1;
                 } 
-                else {
+// FIXME - need to rethink this with KEY_UP and KEY_DOWN
+#if 0
+                else if (!handled && waiting_for_solve) {
                     // didn't press enter, then if were currently solving we should stop
                     // FIXME: even though we clear it here, it somehow isn't cleared at render time?
-                    if (waiting_for_solution) {
-                        waiting_for_solution = false;
-                        for (u32 j = 0; j < 9; j++) {
-                            for (u32 i = 0; i < 9; i++) {
-                                board_data[IDX(i,j)] &= ~BOARD_FLAG_AI;
-                            }
-                        }
-                    }
+                    waiting_for_solve = false;
+                    // for (u32 j = 0; j < 9; j++) {
+                    //     for (u32 i = 0; i < 9; i++) {
+                    //         board_data[IDX(i,j)] &= ~BOARD_FLAG_AI;
+                    //     }
+                    // }
                 }
+#endif
 
                 // board clear
                 if (KEY_UP(GLFW_KEY_BACKSPACE)) {
@@ -1354,7 +1463,6 @@ void main() {
                 if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_N)) {
                     generate_puzzle(board_data);
                     board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
-                    if (hover_idx != 0xFF) board_data[hover_idx] |= BOARD_FLAG_HOVER;
                     handled     = 1;
                     board_input = 1;
                 }
@@ -1462,8 +1570,6 @@ void main() {
                     cursor_idx = IDX(cursor_x, cursor_y);
 
                     board_data = history_ptr->board_data;
-                    board_data[history_ptr->hover_idx] &= ~BOARD_FLAG_HOVER;
-                    hover_idx = 0xFF;
                 }
 
                 // hard undo
@@ -1482,8 +1588,6 @@ void main() {
                     cursor_idx = IDX(cursor_x, cursor_y);
 
                     board_data = history_ptr->board_data;
-                    board_data[history_ptr->hover_idx] &= ~BOARD_FLAG_HOVER;
-                    hover_idx = 0xFF;
                 }
 
                 // quick paste
@@ -1530,7 +1634,7 @@ void main() {
                     }
                 }
 
-#if 1
+#if 0
                 // FIXME - audio debug events
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
                     // To test the sound angle of stereo data
@@ -1703,15 +1807,25 @@ void main() {
         } // end of events
         input_index = 0;
 
+        // ------- End of Event Handling --------
+
 
         // FIXME: crashes on board full of statics
         // make solution progress
-        if (waiting_for_solution) {
-            if (solve_timer_ms >= solve_wait_ms) {
+        if (waiting_for_solve) {
+//             if (solve_timer_ms >= solve_wait_ms) {
+//                 solve_timer_ms -= solve_wait_ms;
+
+            // FIXME
+            if (use_solving_time && solving_time_xd || solve_timer_ms >= solve_wait_ms) {
+                solving_time_xd = 0;
                 solve_timer_ms -= solve_wait_ms;
- 
+
                 u8 status = PROGRESS_INV_CELL; 
                 while(status == PROGRESS_INV_CELL) {
+                    u8  base_x    = patterns[pattern_idx][ai_logic_idx][0];
+                    u8  base_y    = patterns[pattern_idx][ai_logic_idx][1];
+                    ai_cursor_idx = IDX(base_x, base_y);
                     status = make_progress(board_data, base_x, base_y, stage);
 
                     // keep track of stagnation
@@ -1719,58 +1833,50 @@ void main() {
                         stagnation_counter = board_iterations;
                     }
 
+                    // set AI cursor
                     if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL) {
-                        // color if there was a state change
-                        if (clear_x != 0xff && clear_y != 0xff) {
-                            board_data[IDX(clear_x, clear_y)] &= ~(BOARD_FLAG_AI);
-                        }
-
-                        board_data[IDX(base_x, base_y)]   |= BOARD_FLAG_AI;
-                        clear_x                            = base_x;
-                        clear_y                            = base_y;
-                        stagnation_counter                 = 0xFFFF;
-                    } else {
-                        // color the previous altered cell if there wasn't
-                        board_data[IDX(clear_x, clear_y)] |= BOARD_FLAG_AI;
-                    }
+                        stagnation_counter = 0xFFFF;
+                    } 
 
                     // p1: no state change => time to give up
                     // p3: board solved => time to stop
-                    bool p1 = (stagnation_counter != 0xFFFF && board_iterations - stagnation_counter > 1);
+                    bool p1 = (stagnation_counter != 0xFFFF && board_iterations - stagnation_counter > 2*N_PATTERNS);
                     bool p2 = (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL);
                     u8 p3 = 0;
                     if (!p1 && p2) p3 = validate_board(board_data);
                     if (p1 || p3) {
-                        if (clear_x != 0xff && clear_y != 0xff) {
-                            board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
-                        }
+                        solve_wait_ms     = solve_true_ms;
+                        waiting_for_solve = false;
+                        board_iterations  = 0xFFFF;
 
-                        waiting_for_solution = false;
-                        board_iterations     = 0xFFFF;
-
-                        base_x  = 0;
-                        base_y  = 0;
-                        clear_x = 0xff;
-                        clear_y = 0xff;
+                        pattern_idx   = 0;
+                        ai_logic_idx  = 0;
+                        ai_cursor_idx = 0xff;
 
                         break;
                     }
 
-                    // nothing set, retry again next iteration
-                    if (!p2) solve_timer_ms = solve_wait_ms;
-                   
-                    if (status == PROGRESS_INV_CELL) {
-                        stage = 0;
-                        base_x++;
-                        if (base_x > 8) { base_x = 0; base_y++; }
-                        if (base_y > 8) { base_y = 0; board_iterations++; }
+                    // speed up over time
+                    if (status == PROGRESS_SET_CELL) {
+                        solve_wait_ms *= 0.92f;
                     }
+
+                    // nothing set, retry again next iteration
+                    if (status == PROGRESS_DEFAULT) {
+                        solve_timer_ms = solve_wait_ms;
+                        solving_time_xd = 1;
+                    }
+
+                    if (status == PROGRESS_INV_CELL) { stage = 0; ai_logic_idx++; }
                     else {
                         stage++;
                         if (status == PROGRESS_SET_CELL) stage = 3; // force increment
-                        if (stage  > 2) { stage  = 0; base_x++; }
-                        if (base_x > 8) { base_x = 0; base_y++; }
-                        if (base_y > 8) { base_y = 0; board_iterations++; }
+                        if (stage  > 2) { stage  = 0; ai_logic_idx++; }
+                    }
+                    if (ai_logic_idx > 81) { 
+                        pattern_idx = rand() % N_PATTERNS; 
+                        ai_logic_idx = 0; 
+                        board_iterations++; 
                     }
                 }
             }
@@ -1795,6 +1901,15 @@ void main() {
                 audio_updated = 0;
                 ring_clear(local_events);
             }
+        }
+
+        // add volatile cell states, removed after render
+        if (hover_idx < 0xFF) {
+            board_data[hover_idx] |= BOARD_FLAG_HOVER;
+        }
+
+        if (ai_cursor_idx < 0xFF) {
+            board_data[ai_cursor_idx] |= BOARD_FLAG_AI;
         }
 
         // render
@@ -1837,12 +1952,15 @@ void main() {
         glfwSwapBuffers(window);
 
 
-        
-        // reset AI flags
-        //if (clear_x != 0xff && clear_y != 0xff) {
-        //    board_data[IDX(clear_x, clear_y)] &= ~BOARD_FLAG_AI;
-        //}
+        // remove volatile cell states
+        if (hover_idx < 0xFF) {
+            board_data[hover_idx] &= ~u16(BOARD_FLAG_HOVER);
+        }
 
+        if (ai_cursor_idx < 0xFF) {
+            board_data[ai_cursor_idx] &= ~u16(BOARD_FLAG_AI);
+        }
+        
 
 
         // timing

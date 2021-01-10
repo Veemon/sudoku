@@ -43,7 +43,7 @@ goto COMPILE
 
 :COMPILE
 set NAME=sudoku
-cl %ARGS% /nologo /Fe%NAME%.exe %INCLUDES% %SOURCE% /link %LIBRARIES% %LINK_ARGS%
+cl %ARGS% /nologo /F 2000000 /Fe%NAME%.exe %INCLUDES% %SOURCE% /link %LIBRARIES% %LINK_ARGS%
 if ERRORLEVEL 1 (
 	popd
 	exit /b 1
