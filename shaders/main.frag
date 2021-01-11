@@ -137,7 +137,7 @@ void main() {
         shade  = (cursor * (shade-1.0f) * -1.0f) + ((1.0-cursor) * shade);
 
         float bot = 0.45*cursor;
-        shade  = (shade+(2.0f * bot)) / (1.0f + 2.0f*bot);
+        shade = (shade+(3.7f * bot)) / (1.0f + 2.0f*bot);
 
         frag_color.rgb *= 1 - hover;
         frag_color.rgb += hover * hover_color * shade;
@@ -235,8 +235,10 @@ void main() {
             mask = clamp(mask, 0.0, 1.0);
 
             frag_color.rgb *= (1.0 - mask);
-            frag_color.rgb += mix(vec3(s) * mask, 
-                    0.9 * mask * (status_color + hover*vec3(0.6)), cursor);
+            if (i < 2) {
+                frag_color.rgb += mix(vec3(s) * mask, 
+                        0.9 * mask * (status_color + hover*vec3(0.6)), cursor);
+            }
         }
     }
 }

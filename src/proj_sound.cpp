@@ -597,8 +597,6 @@ void audio_loop(ThreadArgs* args) {
         resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 1);
     }
 
-    // TODO: request quality resamples from worker thread
-
 
     // let main thread now we have initialized
     args->init = 1;
