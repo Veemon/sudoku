@@ -439,14 +439,21 @@ u8 validate_board(u16* board_data) {
 #define PROGRESS_INV_CELL       2   // invalid cell
 #define PROGRESS_SET_CELL       3   // cell solved
 
-u8 set_pencils(u16* board) {
+u8 set_pencils(u16* board, u8 clear) {
     u8 statics = 0;
+    u16 mask = BOARD_FLAG_PENCIL | BOARD_ALL;
 
     // set non-statics to full pencils
     for (u16 j = 0; j < 9; j++) {
         for (u16 i = 0; i < 9; i++) {
-            if (!(board[IDX(i,j)] & BOARD_FLAG_STATIC)) {
-                board[IDX(i,j)] |= BOARD_FLAG_PENCIL | BOARD_ALL;
+            u16 idx = IDX(i,j);
+            if (!(board[idx] & BOARD_FLAG_STATIC)) {
+                if (clear) {
+                    board[idx] |= mask;
+                } else if (!(board[idx] & BOARD_ALL) || (board[idx] & BOARD_FLAG_PENCIL)) {
+                    // set if there is only 1 bit set
+                    board[idx] |= mask;
+                }
             } else statics++;
         }
     }
@@ -981,7 +988,7 @@ void generate_puzzle(u16* board) {
         if (board[idx] == tmp) continue;
 
         u8 solved = 0;
-        set_pencils(board);
+        set_pencils(board, 1);
         for (u32 n = 0; n < N; n++) {
 #if 0
             // - solve with patterns
@@ -1569,14 +1576,14 @@ void main() {
                                 board_iterations = 0;
                                 board_input      = 1;
 
-                                waiting_for_solve = set_pencils(board_data);
+                                waiting_for_solve = set_pencils(board_data, !(event.mod & GLFW_MOD_SHIFT));
                                 break;
                             }
                         }
                     }
                     handled = 1;
                 } 
-                else if (!handled && waiting_for_solve) {
+                else if (!handled && waiting_for_solve && !event.mod && event.key < GLFW_KEY_KP_9) {
                     // didn't press enter, then if were currently solving we should stop
                     waiting_for_solve = false;
                     ai_cursor_idx = 0xff;

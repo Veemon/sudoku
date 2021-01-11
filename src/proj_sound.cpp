@@ -222,22 +222,6 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
             }
         }
     }
-    else if (quality > 1) {
-        printf("[Audio]  --  Sinc Interpolation not implemented!!!\n");
-        // FIXME - not implemented correctly
-        // whittaker-shannon interpolation
-        f32 T = f32(BUFFER_SIZE) / rate;
-        for (u8 c = 0; c < sound->channels; c++) {
-            for (u32 i = 0; i < length; i++) {
-                f32 t = f32(i) * T;
-                for (u32 j = 0; j < BUFFER_SIZE; j++) {
-                    i32 n = -(i32)(BUFFER_SIZE>>1) + i + j;
-                    if (n < 0 || n > sound->length - 1) continue;
-                    out[c][i] += data[c][n] * sinc((t - n*T)/T);
-                }
-            }
-        }
-    }
 
     // re-interleave resampled data
     free(sound->data);

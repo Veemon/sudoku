@@ -19,4 +19,5 @@
 * `Ctrl+N`      to generate a new puzzle
 * `Ctrl+V`      to paste a puzzle from your clipboard
 * `Ctrl+R`      to retry, removing all non-permenant cells
-* `Enter`       to automatically solve
+* `Enter`       to clear markings and automatically solve
+* `Shift+Enter` to solve from the current board
