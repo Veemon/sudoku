@@ -14,8 +14,6 @@ Make the solver smarter
 
 Extend the solver to perform graph traversals
 
-Fix Segfaults / Crashes
-
 XXX
 ------------------------------
 Make the solver smarter
@@ -441,15 +439,19 @@ u8 validate_board(u16* board_data) {
 #define PROGRESS_INV_CELL       2   // invalid cell
 #define PROGRESS_SET_CELL       3   // cell solved
 
-void set_pencils(u16* board) {
+u8 set_pencils(u16* board) {
+    u8 statics = 0;
+
     // set non-statics to full pencils
     for (u16 j = 0; j < 9; j++) {
         for (u16 i = 0; i < 9; i++) {
             if (!(board[IDX(i,j)] & BOARD_FLAG_STATIC)) {
                 board[IDX(i,j)] |= BOARD_FLAG_PENCIL | BOARD_ALL;
-            }
+            } else statics++;
         }
     }
+
+    return statics != 81;
 }
 
 /*
@@ -1537,8 +1539,6 @@ void main() {
 
 
             if (event.type == INPUT_TYPE_KEY_PRESS) {
-                // FIXME: segfault with escape + ctrl-n + ctrl-z
-
                 // quit or clear
                 if (!handled && KEY_DOWN(GLFW_KEY_ESCAPE)) {
                     // quit
@@ -1569,7 +1569,7 @@ void main() {
                                 board_iterations = 0;
                                 board_input      = 1;
 
-                                set_pencils(board_data);
+                                waiting_for_solve = set_pencils(board_data);
                                 break;
                             }
                         }
@@ -1683,8 +1683,6 @@ void main() {
 
                 // undo
                 if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_Z)) {
-                    // FIXME this seems to seg fault if u spam enter and then undo
-
                     handled    = 1;
                     board_undo = 1;
 
@@ -1944,7 +1942,6 @@ void main() {
         // ------- End of Event Handling --------
 
 
-        // FIXME: crashes on board full of statics
         // make solution progress
         if (waiting_for_solve) {
             if (solve_timer_ms >= solve_wait_ms) {
