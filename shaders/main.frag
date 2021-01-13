@@ -9,9 +9,8 @@ layout (location = 0) out vec4 frag_color;
 uniform sampler2D  font;
 uniform usampler2D board;
 
-uniform vec2 time;
-// current time
-// time at cursor move
+uniform float time;
+
 
 float fetch_number(float n, vec2 ref_coord) {
     ref_coord.x = ref_coord.x * (1.0/9.0) + ((n-1.0)/9.0);
@@ -20,15 +19,14 @@ float fetch_number(float n, vec2 ref_coord) {
 
 
 void main() {
-    // base color
-    frag_color = vec4(vec3(0.97), 1.0); 
-
-
     // startup
-    const float q = 0.50f;
-    float startup1 = pow(clamp(time.x, 0.0f, 0.5f) / 0.5f, q);
-    float startup2 = pow(clamp(time.x, 0.0f, 1.5f) / 1.5f, q);
-    float startup3 = pow(clamp(time.x, 0.0f, 3.0f) / 3.0f, q);
+    const float start_time = 2.0f;
+    float startup = pow(clamp(time, 0.0f, start_time) / start_time, 0.30);
+
+
+    // base color
+    frag_color = vec4(vec3(0.97), startup); 
+
 
 
     // identification (welcome to arstotzka)
@@ -92,7 +90,7 @@ void main() {
         shade_mask      = clamp(shade_mask, 0.0, 1.0);
         shade_mask     -= shade_m1 * shade_m2;
         
-        frag_color.rgb *= 1 - shade_mask * startup1;
+        frag_color.rgb *= 1 - shade_mask;
         frag_color.rgb += shade_mask * vec3(0.85);
     }
 
@@ -127,8 +125,8 @@ void main() {
         shade *= smoothstep(lr-eps, lr, cell_coord.x) * smoothstep(cell_coord.x-eps, cell_coord.x, hr);
         shade *= smoothstep(lr-eps, lr, cell_coord.y) * smoothstep(cell_coord.y-eps, cell_coord.y, hr);
 
-        frag_color.rgb *= 1 - cursor * startup2;
-        frag_color.rgb += cursor * cursor_color * shade * 1.04; // oversaturate
+        frag_color.rgb *= 1 - cursor;
+        frag_color.rgb += (cursor * cursor_color * shade * 1.04); // oversaturate
         frag_color = clamp(frag_color, 0.0, 1.0);
     }
 
@@ -243,11 +241,10 @@ void main() {
             mask += smoothstep(1.0-w-e, 1.0-w, uv.y) * smoothstep(uv.y-e, uv.y, 1.0+w); // down
             mask = clamp(mask, 0.0, 1.0);
 
-            frag_color.rgb *= (1.0 - mask);
-            if (i < 2) {
-                frag_color.rgb += mix(vec3(s) * mask, 
-                        0.9 * mask * (status_color + hover*vec3(0.6)), cursor);
-            }
+            float skip = float( i != 2 );
+            frag_color.rgb *= 1.0 - mask;
+            frag_color.rgb += mix(vec3(s) * mask, 
+                    0.9 * mask * (status_color + skip*hover*vec3(0.6)), cursor);
         }
     }
 }

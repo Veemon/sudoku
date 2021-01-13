@@ -1365,22 +1365,22 @@ void main() {
 
 
     // timing
-    LARGE_INTEGER start_time, end_time, delta_ms, cpu_freq;
+    LARGE_INTEGER start_time, end_time, delta_us, cpu_freq;
     QueryPerformanceFrequency(&cpu_freq);
-    delta_ms.QuadPart = 0;
+    delta_us.QuadPart = 0;
 
     QueryPerformanceCounter(&start_time);
     srand(start_time.QuadPart);
 
-    i64 total_time_ms = 0;
+    i64 total_time_us = 0;
     f32 total_time    = 0.0f;
 
-    i64 solve_true_ms  = 16;
-    i64 solve_wait_ms  = solve_true_ms;
-    i64 solve_timer_ms = solve_wait_ms;
+    i64 solve_true_us  = 16 * pow_10[3];
+    i64 solve_wait_us  = solve_true_us;
+    i64 solve_timer_us = solve_wait_us;
 
-    i64 render_wait_ms  = 1000 / monitor_rate;
-    i64 render_timer_ms = render_wait_ms;
+    i64 render_wait_us  = pow_10[6] / monitor_rate;
+    i64 render_timer_us = render_wait_us;
 
 
 
@@ -1422,7 +1422,6 @@ void main() {
     f32 mouse_y = 0;
 
     f32 total_time_at_click  = -1.0;
-    f32 total_time_at_cursor = -1.0;
 
     i8 cursor_x = 4;
     i8 cursor_y = 4;
@@ -1536,13 +1535,9 @@ void main() {
                     if (hover_idx < 0xFF) {
                         board_data[cursor_idx] &= ~u16(BOARD_FLAG_CURSOR);
 
-                        u16 tmp = IDX(cursor_x, cursor_y);
                         cursor_x = mouse_target_x;
                         cursor_y = mouse_target_y;
                         cursor_idx = IDX(cursor_x, cursor_y);
-                        if (tmp != cursor_idx) {
-                            total_time_at_cursor = total_time;
-                        }
 
                         board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
                         board_input      = 1;
@@ -1579,7 +1574,7 @@ void main() {
                                 }
                             }
                             if (waiting_for_solve) {
-                                solve_wait_ms = solve_true_ms;
+                                solve_wait_us = solve_true_us;
 
                                 ai_logic_idx     = 0;
                                 ai_cursor_idx    = 0xff;
@@ -1963,8 +1958,8 @@ void main() {
 
         // make solution progress
         if (waiting_for_solve) {
-            if (solve_timer_ms >= solve_wait_ms) {
-                solve_timer_ms -= solve_wait_ms;
+            if (solve_timer_us > solve_wait_us - 1) {
+                solve_timer_us -= solve_wait_us;
 
                 u8 status = PROGRESS_INV_CELL; 
                 while(status == PROGRESS_INV_CELL) {
@@ -1990,7 +1985,7 @@ void main() {
                     u8 p3 = 0;
                     if (!p1 && p2) p3 = validate_board(board_data);
                     if (p1 || p3) {
-                        solve_wait_ms     = solve_true_ms;
+                        solve_wait_us     = solve_true_us;
                         waiting_for_solve = false;
                         board_iterations  = 0xFFFF;
 
@@ -2003,16 +1998,16 @@ void main() {
 
                     // speed up over time
                     if (status == PROGRESS_SET_CELL) {
-                        if (solve_wait_ms <= 1) {
-                            solve_wait_ms = 1;
+                        if (solve_wait_us < 300) {
+                            solve_wait_us = 300;
                         } else {
-                            solve_wait_ms *= 0.92f;
+                            solve_wait_us *= 0.92f;
                         }
                     }
 
                     // nothing set, retry again next iteration
                     if (status == PROGRESS_DEFAULT) {
-                        solve_timer_ms = solve_wait_ms;
+                        solve_timer_us = solve_wait_us;
                     }
 
                     if (status == PROGRESS_INV_CELL) { stage = 0; ai_logic_idx++; }
@@ -2064,8 +2059,8 @@ void main() {
         }
 
         // render
-        if (render_timer_ms >= render_wait_ms) {
-            render_timer_ms -= render_wait_ms;
+        if (render_timer_us >  render_wait_us - 1) {
+            render_timer_us -= render_wait_us;
 
             glClearColor(0.9f, 0.9f, 0.9f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -2079,7 +2074,7 @@ void main() {
             glUniform1i(u_font, 0);
             glUniform1i(u_board, 1);
 
-            glUniform2f(u_time, total_time, total_time_at_cursor);
+            glUniform1f(u_time, total_time);
 
             glActiveTexture(GL_TEXTURE0 + 0);
             glBindTexture(GL_TEXTURE_2D, tex_font);
@@ -2118,15 +2113,15 @@ void main() {
 
         // timing
         QueryPerformanceCounter(&end_time);
-        delta_ms.QuadPart = end_time.QuadPart - start_time.QuadPart;
-        delta_ms.QuadPart *= 1000;
-        delta_ms.QuadPart /= cpu_freq.QuadPart;
+        delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
+        delta_us.QuadPart *= pow_10[6];
+        delta_us.QuadPart /= cpu_freq.QuadPart;
 
-        total_time_ms   += delta_ms.QuadPart;
-        render_timer_ms += delta_ms.QuadPart;
-        solve_timer_ms  += delta_ms.QuadPart;
+        total_time_us   += delta_us.QuadPart;
+        render_timer_us += delta_us.QuadPart;
+        solve_timer_us  += delta_us.QuadPart;
 
-        total_time = f64(total_time_ms) / 1000.0;
+        total_time = f64(total_time_us) / pow_10[6];
     }
 
     glfwDestroyWindow(window);
