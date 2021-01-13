@@ -8,20 +8,14 @@ Handle sound variations in proj_main
     variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
 
 Make the solver smarter
-:: src => square / row / column
- - if you see the only place for 1's in the src:a is in src:b,
-   propagate to the rest of the src:b, removing 1's
+ - if you see the only place for 1's in the square is in column 3,
+   propagate to the rest of column 8, removing 1's
+
 
 Extend the solver to perform graph traversals
 
-shader
-- total time
-- last time since click
-
 XXX
 ------------------------------
-Make the solver smarter
- - for example, if u see theres only 1 place for a penciled number in the [square,row,col], ink it
 
 */
 
@@ -613,13 +607,23 @@ u8 fast_solve(u16* board) {
     \
     u16 check = board[base_idx] & BOARD_ALL;\
     if (check && !(check & (check-1))) {\
+        /*
+           0000 0000 0010 0000 :: check :: we have only 1 option
+           0000 0000 0001 1111 :: check - 1
+           0000 0000 0000 0000 :: check & (check-1)
+           0000 0000 0000 0001 :: !(check & (check-1))
+
+           0000 0000 1111 0000 :: check :: we have multiple options
+           0000 0000 1110 1111 :: check - 1
+           0000 0000 1110 0000 :: check & (check-1)
+           0000 0000 0000 0000 :: !(check & (check-1))
+        */\
         board[base_idx] &= ~u16(BOARD_FLAG_PENCIL);\
         state_change     = PROGRESS_SET_CELL;\
     } else if (cache < BOARD_ALL){\
         /*
-           For when you inevitably forget,
-           0000 0001 1011 1111 :: cache - no 7's in the square/row/col
-           0000 0000 1111 0000 :: board - we can put our 7 down
+           0000 0001 1011 1111 :: cache :: no 7's in the square/row/col
+           0000 0000 1111 0000 :: board :: we can put our 7 down
            
            0000 0000 1011 0000 :: board & cache
            0000 0000 0100 0000 :: board ^ (board & cache)
@@ -634,9 +638,7 @@ u8 fast_solve(u16* board) {
 }
 
 
-
-// NOTE: u should really apply memoization here
-// for use in the generator you could even write a faster solve thats not designed for rendering?
+// NOTE: this procedure is aesthetics > function
 u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
     u8 state_change = PROGRESS_DEFAULT;
 
@@ -652,16 +654,79 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
 
     // check square
     if (stage == 0) {
+        #define R(i)   sq_cache[0+i]
+        #define C(i)   sq_cache[3+i]
+        u16 sq_cache[6]; // caches 3 rows + 3 cols
+        for (u8 i = 0; i < 6; i++) sq_cache[i] = 0;
+
         for (u16 cmp_y = 0; cmp_y < 3; cmp_y++) {
             for (u16 cmp_x = 0; cmp_x < 3; cmp_x++) {
                 u16 cmp_inner_x = (base_x/3)*3+cmp_x;
                 u16 cmp_inner_y = (base_y/3)*3+cmp_y;
                 u16 cmp_idx = IDX(cmp_inner_x, cmp_inner_y);
+
+                // cache only pencil digits
+                u8 pencil = (board[cmp_idx] & BOARD_FLAG_PENCIL) > 0;
+                R(cmp_y) |= pencil * (board[cmp_idx] & BOARD_ALL);
+                C(cmp_x) |= pencil * (board[cmp_idx] & BOARD_ALL);
+
                 if (cmp_idx == base_idx) continue;
                 DEDUCE();
             }
         }
+
+        /*
+            -- determine if this is a row or column application
+
+                                                9 9
+                                                v v
+                                               +-----+
+                       3 7 8            7, 8 > |3 * *| ---> 7, 8 ---> 
+                       5 1 2    =>             |5 1 2|                 
+                       9 6 4                   |* 6 4|
+                                               +-----+
+                                        
+               0000 0001 1100 0000 :: r1    0000 0000 0000 0000 :: p1 = r1 & r2          
+               0000 0000 0000 0000 :: r2    0000 0001 0000 0000 :: p2 = r1 & r3          
+               0000 0001 0000 0000 :: r3    0000 0000 0000 0000 :: p3 = r2 & r3          
+                                            0000 0000 0000 0001 :: p1 || p2 || p3
+
+               0000 0001 0000 0000 :: c1    0000 0000 0000 0000 ::   
+               0000 0001 1100 0000 :: c2    0000 0000 0000 0000 ::   
+               0000 0000 1100 0000 :: c3    0000 0000 0000 0000 ::   
+                                            0000 0000 0000 0000 :: 
+        */
+
+        u16 p1, p2, p3, q;
+
+        // propagate removals through rows
+        p1 = R(0) & R(1);
+        p2 = R(0) & R(2);
+        p3 = R(1) & R(2);
+        q  = !(p1 | p2 | p3);
+        for (u16 j = 0; j < 3 * q; j++) {
+            for (u16 i = 0; i < 9; i++) {
+                board[IDX(i, (base_y/3)*3+j)] &= q * ~R(j);
+            }
+        }
+
+
+        // propagate removals through cols
+        p1 = C(0) & C(1);
+        p2 = C(0) & C(2);
+        p3 = C(1) & C(2);
+        q  = !(p1 | p2 | p3);
+        for (u16 j = 0; j < 3 * q; j++) {
+            for (u16 i = 0; i < 9; i++) {
+                board[IDX((base_x/3)*3+j, i)] &= q * ~C(j);
+            }
+        }
+
+
         INK();
+
+        #undef R
+        #undef C
     }
 
     // check row
@@ -1565,8 +1630,8 @@ void main() {
 
                 // check - solve
                 if (!handled && KEY_UP(GLFW_KEY_ENTER)) {
-                    // check if there's statics
                     if (!waiting_for_solve) {
+                        // check if there's statics
                         for (u8 j = 0; j < 9; j++) {
                             for (u8 i = 0; i < 9; i++) {
                                 if (board_data[IDX(i,j)] & BOARD_FLAG_STATIC) {
@@ -1575,14 +1640,20 @@ void main() {
                                 }
                             }
                             if (waiting_for_solve) {
-                                solve_wait_us = solve_true_us;
 
-                                ai_logic_idx     = 0;
-                                ai_cursor_idx    = 0xff;
-                                board_iterations = 0;
-                                board_input      = 1;
+                                if (event.mod & GLFW_MOD_CONTROL) {
+                                    // FIXME
+                                    printf("[Main]  --- you should implement insta solve here :)\n");
+                                } else {
+                                    solve_wait_us = solve_true_us;
 
-                                waiting_for_solve = set_pencils(board_data, !(event.mod & GLFW_MOD_SHIFT));
+                                    ai_logic_idx     = 0;
+                                    ai_cursor_idx    = 0xff;
+                                    board_iterations = 0;
+                                    board_input      = 1;
+
+                                    waiting_for_solve = set_pencils(board_data, !(event.mod & GLFW_MOD_SHIFT));
+                                }
                                 break;
                             }
                         }

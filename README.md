@@ -21,3 +21,4 @@
 * `Ctrl+R`      to retry, removing all non-permenant cells
 * `Enter`       to clear markings and automatically solve
 * `Shift+Enter` to solve from the current board
+* `Ctrl+Enter`  instant solve
