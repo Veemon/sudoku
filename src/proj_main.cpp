@@ -1375,7 +1375,8 @@ void main() {
     i64 total_time_us = 0;
     f32 total_time    = 0.0f;
 
-    i64 solve_true_us  = 16 * pow_10[3];
+    i64 solve_true_us  = 23 * pow_10[3];
+    i64 solve_min_us   = 300;
     i64 solve_wait_us  = solve_true_us;
     i64 solve_timer_us = solve_wait_us;
 
@@ -1998,8 +1999,8 @@ void main() {
 
                     // speed up over time
                     if (status == PROGRESS_SET_CELL) {
-                        if (solve_wait_us < 300) {
-                            solve_wait_us = 300;
+                        if (solve_wait_us < solve_min_us) {
+                            solve_wait_us = solve_min_us;
                         } else {
                             solve_wait_us *= 0.92f;
                         }

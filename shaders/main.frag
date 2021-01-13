@@ -19,6 +19,9 @@ float fetch_number(float n, vec2 ref_coord) {
 
 
 void main() {
+    float st  = sin(time);
+    float st4 = sin(4*time);
+
     // startup
     const float start_time = 2.0f;
     float startup = pow(clamp(time, 0.0f, start_time) / start_time, 0.30);
@@ -55,7 +58,7 @@ void main() {
     vec3 solve_color        = vec3(0.28, 0.68, 0.16);
     vec3 static_error_color = vec3(0.77, 0.35, 0.12);
     vec3 hover_color        = vec3(0.33);
-    vec3 ai_color           = vec3(0.60, 0.10, 0.50);
+    vec3 ai_color           = vec3(0.60 + 0.10*st, 0.10, 0.50 - 0.10*st) + 0.05*st4*st4;
 
     vec3 status_color  = vec3(0.0);
     status_color      += float(static_flag)  * static_color;
@@ -70,7 +73,7 @@ void main() {
 
     // NOTE: ideally this is a lot better done in HSV
     vec3 cursor_color;
-    cursor_color = vec3(0.785) + status_color*0.45;
+    cursor_color = vec3(0.785) + status_color*0.45 - 0.03*st*st;
     ai_color     = vec3(0.815) + status_color*0.65;
 
     float overlap = ceil((cursor-hover)*(cursor-hover));
