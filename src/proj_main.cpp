@@ -14,6 +14,10 @@ Make the solver smarter
 
 Extend the solver to perform graph traversals
 
+shader
+- total time
+- last time since click
+
 XXX
 ------------------------------
 Make the solver smarter
@@ -1256,6 +1260,7 @@ void main() {
     GLuint u_font  = glGetUniformLocation(shader_program_main, "font");
     GLuint u_board = glGetUniformLocation(shader_program_main, "board");
 
+    GLuint u_time    = glGetUniformLocation(shader_program_main, "time");
 
 
     #define PATH_SHADER_MOUSE_VERT "./shaders/mouse.vert"
@@ -1416,7 +1421,8 @@ void main() {
     f32 mouse_x = 0;
     f32 mouse_y = 0;
 
-    f32 total_time_at_click = -1.0;
+    f32 total_time_at_click  = -1.0;
+    f32 total_time_at_cursor = -1.0;
 
     i8 cursor_x = 4;
     i8 cursor_y = 4;
@@ -1530,9 +1536,13 @@ void main() {
                     if (hover_idx < 0xFF) {
                         board_data[cursor_idx] &= ~u16(BOARD_FLAG_CURSOR);
 
+                        u16 tmp = IDX(cursor_x, cursor_y);
                         cursor_x = mouse_target_x;
                         cursor_y = mouse_target_y;
                         cursor_idx = IDX(cursor_x, cursor_y);
+                        if (tmp != cursor_idx) {
+                            total_time_at_cursor = total_time;
+                        }
 
                         board_data[cursor_idx] |= BOARD_FLAG_CURSOR;
                         board_input      = 1;
@@ -1919,6 +1929,8 @@ void main() {
                         u_font  = glGetUniformLocation(shader_program_main, "font");
                         u_board = glGetUniformLocation(shader_program_main, "board");
 
+                        u_time  = glGetUniformLocation(shader_program_main, "time");
+
                         glDeleteProgram(old_shader_program_main);
                         glUseProgram(shader_program_main);
                     }
@@ -2066,6 +2078,8 @@ void main() {
 
             glUniform1i(u_font, 0);
             glUniform1i(u_board, 1);
+
+            glUniform2f(u_time, total_time, total_time_at_cursor);
 
             glActiveTexture(GL_TEXTURE0 + 0);
             glBindTexture(GL_TEXTURE_2D, tex_font);

@@ -9,6 +9,9 @@ layout (location = 0) out vec4 frag_color;
 uniform sampler2D  font;
 uniform usampler2D board;
 
+uniform vec2 time;
+// current time
+// time at cursor move
 
 float fetch_number(float n, vec2 ref_coord) {
     ref_coord.x = ref_coord.x * (1.0/9.0) + ((n-1.0)/9.0);
@@ -20,6 +23,12 @@ void main() {
     // base color
     frag_color = vec4(vec3(0.97), 1.0); 
 
+
+    // startup
+    const float q = 0.50f;
+    float startup1 = pow(clamp(time.x, 0.0f, 0.5f) / 0.5f, q);
+    float startup2 = pow(clamp(time.x, 0.0f, 1.5f) / 1.5f, q);
+    float startup3 = pow(clamp(time.x, 0.0f, 3.0f) / 3.0f, q);
 
 
     // identification (welcome to arstotzka)
@@ -83,7 +92,7 @@ void main() {
         shade_mask      = clamp(shade_mask, 0.0, 1.0);
         shade_mask     -= shade_m1 * shade_m2;
         
-        frag_color.rgb *= 1 - shade_mask;
+        frag_color.rgb *= 1 - shade_mask * startup1;
         frag_color.rgb += shade_mask * vec3(0.85);
     }
 
@@ -118,7 +127,7 @@ void main() {
         shade *= smoothstep(lr-eps, lr, cell_coord.x) * smoothstep(cell_coord.x-eps, cell_coord.x, hr);
         shade *= smoothstep(lr-eps, lr, cell_coord.y) * smoothstep(cell_coord.y-eps, cell_coord.y, hr);
 
-        frag_color.rgb *= 1 - cursor;
+        frag_color.rgb *= 1 - cursor * startup2;
         frag_color.rgb += cursor * cursor_color * shade * 1.04; // oversaturate
         frag_color = clamp(frag_color, 0.0, 1.0);
     }

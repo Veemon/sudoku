@@ -15,13 +15,8 @@ uniform vec2 time;
 // time at click
 
 void main() {
-#if 1
     float s1 = 0.17;
     float s2 = s1 * 4.0 / 3.0; 
-#else 
-    float s1 = 0.6;
-    float s2 = s1 * 4.0 / 3.0; 
-#endif
 
     float time_delta = time.y - time.x;
 
