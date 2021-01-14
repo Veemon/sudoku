@@ -595,6 +595,7 @@ u8 fast_solve(u16* board) {
     \
     if (cell_static || !cell_pencil) {\
         u16 tmp = board[base_idx] & BOARD_ALL;\
+        set_cache |= tmp;\
         board[base_idx] &= ~(BOARD_ALL & board[cmp_idx]);\
         if (tmp != (board[base_idx] & BOARD_ALL)) {\
             state_change = PROGRESS_STATE_CHANGE;\
@@ -662,7 +663,8 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
         }
 #endif
 
-    u16 cache = 0;
+    u16 cache = 0;     // caches all digits
+    u16 set_cache = 0; // caches static and inked values
 
     // check square
     if (stage == 0) {
@@ -670,6 +672,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
         #define C(i)   sq_cache[3+i]
         u16 sq_cache[6]; // caches 3 rows + 3 cols
         for (u8 i = 0; i < 6; i++) sq_cache[i] = 0;
+
 
 #if DEBUG_SQUARE_RULE
     if (square_rule) {
@@ -692,6 +695,8 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
                 C(cmp_x) |= digits;
             }
         }
+
+        set_cache &= BOARD_ALL;
         
         // square cache base cell
         u16 digits = board[base_idx] & BOARD_ALL;
@@ -701,26 +706,27 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
         /*
             -- determine if this is a row or column application
 
-                                                9 9
-                                                v v
-                                               +-----+
-                       3 7 8            7, 8 > |3 * *| ---> 7, 8 ---> 
-                       5 1 2    =>             |5 1 2|                 
-                       9 6 4                   |* 6 4|
-                                               +-----+
-                                        
-               0000 0001 1100 0000 :: r1    0000 0000 1100 0000 :: q1 = r1 & ~(r2 | r3)   -- Get numbers exclusive to this row
-               0000 0000 0000 0000 :: r2    0000 0000 0000 0000 :: q2 = r2 & ~(r1 | r3)          
-               0000 0001 0000 0000 :: r3    0000 0000 0000 0000 :: q3 = r3 & ~(r1 | r2)          
+                                                9 9                            
+                                                v v                            
+                                               +-----+                         
+                       3 7 8            7, 8 > |3 * *| ---> 7, 8 --->          
+                       5 1 2    =>             |5 1 2|                         
+                       9 6 4             3*  > |* 6 4|                        3* to indicate lingering option 
+                                               +-----+                         
+               0000 0000 0011 1111 :: set
 
-               0000 0001 0000 0000 :: c1    0000 0000 0000 0000 :: q1 = c1 & ~(c2 | c3)   -- Get numbers exclusive to this col
-               0000 0001 1100 0000 :: c2    0000 0000 0000 0000 :: q2 = c2 & ~(c1 | c3)                                        
-               0000 0000 1100 0000 :: c3    0000 0000 0000 0000 :: q3 = c3 & ~(c1 | c2)                                        
+               0000 0001 1100 0000 :: r1    0000 0000 1100 0000 :: q1 = r1 & ~(r2 | r3 | set)   -- Get pencil numbers exclusive to this row
+               0000 0000 0000 0000 :: r2    0000 0000 0000 0000 :: q2 = r2 & ~(r1 | r3 | set)          
+               0000 0001 0000 0100 :: r3    0000 0000 0000 0000 :: q3 = r3 & ~(r1 | r2 | set)          
+
+               0000 0001 0000 0100 :: c1    0000 0000 0000 0000 :: q1 = c1 & ~(c2 | c3 | set)   -- Get pencil numbers exclusive to this col
+               0000 0001 1100 0000 :: c2    0000 0000 0000 0000 :: q2 = c2 & ~(c1 | c3 | set)                                        
+               0000 0000 1100 0000 :: c3    0000 0000 0000 0000 :: q3 = c3 & ~(c1 | c2 | set)                                        
         */
 
         // NOTE: apply square rule after trivial pencils are cleared out
-        if (square_rule) {
-            u8  _set = 0;
+        u8  _set = 0;
+        if (square_rule && board) {
             u16 q[3];
             u16 lower, upper;
 
@@ -737,9 +743,9 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
             lower *= 3;
 
             // propagate removals through rows
-            q[0] = R(0) & ~(R(1) | R(2));
-            q[1] = R(1) & ~(R(0) | R(2));
-            q[2] = R(2) & ~(R(0) | R(1));
+            q[0] = R(0) & ~(R(1) | R(2) | set_cache);
+            q[1] = R(1) & ~(R(0) | R(2) | set_cache);
+            q[2] = R(2) & ~(R(0) | R(1) | set_cache);
             for (u16 j = 0; j < 3; j++) {
                 for (u16 i = 0; i < 9 * (q[j]>0); i++) {
                     if (i >= lower && i < upper) continue;
@@ -777,9 +783,9 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
             lower *= 3;
 
             // propagate removals through cols
-            q[0] = C(0) & ~(C(1) | C(2));
-            q[1] = C(1) & ~(C(0) | C(2));
-            q[2] = C(2) & ~(C(0) | C(1));
+            q[0] = C(0) & ~(C(1) | C(2) | set_cache);
+            q[1] = C(1) & ~(C(0) | C(2) | set_cache);
+            q[2] = C(2) & ~(C(0) | C(1) | set_cache);
             for (u16 j = 0; j < 3; j++) {
                 for (u16 i = 0; i < 9 * (q[j]>0); i++) {
                     if (i >= lower && i < upper) continue;
@@ -809,8 +815,6 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
             printf("    q3 :: ");
             DEBUG_U16(q[2]);
             printf("\n");
-
-            if (_set) return PROGRESS_DEBUG;
 #endif
 
             #undef R
@@ -818,6 +822,10 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
         }
 
         INK();
+
+#if DEBUG_SQUARE_RULE
+        if (_set) return PROGRESS_DEBUG;
+#endif 
     }
 
     // check row
@@ -1541,8 +1549,9 @@ void main() {
     i64 solve_timer_us = solve_wait_us;
 
     // FIXME
-    u8 using_stepper = 0;
-    u8 stepper = 0;
+    u8 using_stepper_running = 0;
+    u8 using_stepper         = 0;
+    u8 stepper               = 0;
 
     i64 render_wait_us  = pow_10[6] / monitor_rate;
     i64 render_timer_us = render_wait_us;
@@ -2149,15 +2158,15 @@ void main() {
                     ai_cursor_idx = IDX(base_x, base_y);
                     status = make_progress(board_data, base_x, base_y, stage, board_iterations);
 
-                    // keep track of stagnation
-                    if (stagnation_counter == 0xFFFF && status == PROGRESS_DEFAULT) {
-                        stagnation_counter = board_iterations;
-                    }
-
                     // debug
                     if (status == PROGRESS_DEBUG) {
                         status = PROGRESS_SET_CELL;
-                        using_stepper = 1;
+                        using_stepper = using_stepper_running;
+                    }
+
+                    // keep track of stagnation
+                    if (stagnation_counter == 0xFFFF && status == PROGRESS_DEFAULT) {
+                        stagnation_counter = board_iterations;
                     }
 
                     // set AI cursor
