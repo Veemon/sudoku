@@ -436,6 +436,7 @@ u8 validate_board(u16* board_data) {
 #define PROGRESS_STATE_CHANGE   1   // state change
 #define PROGRESS_INV_CELL       2   // invalid cell
 #define PROGRESS_SET_CELL       3   // cell solved
+#define PROGRESS_DEBUG          4   // exit
 
 u8 set_pencils(u16* board, u8 clear) {
     u8 statics = 0;
@@ -664,16 +665,21 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
                 u16 cmp_inner_x = (base_x/3)*3+cmp_x;
                 u16 cmp_inner_y = (base_y/3)*3+cmp_y;
                 u16 cmp_idx = IDX(cmp_inner_x, cmp_inner_y);
-
-                // cache only pencil digits
-                u8 pencil = (board[cmp_idx] & BOARD_FLAG_PENCIL) > 0;
-                R(cmp_y) |= pencil * (board[cmp_idx] & BOARD_ALL);
-                C(cmp_x) |= pencil * (board[cmp_idx] & BOARD_ALL);
-
                 if (cmp_idx == base_idx) continue;
                 DEDUCE();
+
+                // square cache comparing pencils
+                u16 pencil = (board[cmp_idx] & BOARD_FLAG_PENCIL) > 0;
+                u16 digits = pencil * (board[cmp_idx] & BOARD_ALL);
+                R(cmp_y) |= digits;
+                C(cmp_x) |= digits;
             }
         }
+        
+        // square cache base cell
+        u16 digits = board[base_idx] & BOARD_ALL;
+        R(base_y/3) |= digits;
+        C(base_x/3) |= digits;
 
         /*
             -- determine if this is a row or column application
@@ -686,47 +692,99 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
                        9 6 4                   |* 6 4|
                                                +-----+
                                         
-               0000 0001 1100 0000 :: r1    0000 0000 0000 0000 :: p1 = r1 & r2          
-               0000 0000 0000 0000 :: r2    0000 0001 0000 0000 :: p2 = r1 & r3          
-               0000 0001 0000 0000 :: r3    0000 0000 0000 0000 :: p3 = r2 & r3          
-                                            0000 0000 0000 0001 :: p1 || p2 || p3
+               0000 0001 1100 0000 :: r1    0000 0000 1100 0000 :: q1 = r1 & ~(r2 | r3)   -- Get numbers exclusive to this row
+               0000 0000 0000 0000 :: r2    0000 0000 0000 0000 :: q2 = r2 & ~(r1 | r3)          
+               0000 0001 0000 0000 :: r3    0000 0000 0000 0000 :: q3 = r3 & ~(r1 | r2)          
 
-               0000 0001 0000 0000 :: c1    0000 0000 0000 0000 ::   
-               0000 0001 1100 0000 :: c2    0000 0000 0000 0000 ::   
-               0000 0000 1100 0000 :: c3    0000 0000 0000 0000 ::   
-                                            0000 0000 0000 0000 :: 
+               0000 0001 0000 0000 :: c1    0000 0000 0000 0000 :: q1 = c1 & ~(c2 | c3)   -- Get numbers exclusive to this col
+               0000 0001 1100 0000 :: c2    0000 0000 0000 0000 :: q2 = c2 & ~(c1 | c3)                                        
+               0000 0000 1100 0000 :: c3    0000 0000 0000 0000 :: q3 = c3 & ~(c1 | c2)                                        
         */
 
-        u16 p1, p2, p3, q;
+        u8  _set = 0;
+        u16 q[3];
 
         // propagate removals through rows
-        p1 = R(0) & R(1);
-        p2 = R(0) & R(2);
-        p3 = R(1) & R(2);
-        q  = !(p1 | p2 | p3);
-        for (u16 j = 0; j < 3 * q; j++) {
-            for (u16 i = 0; i < 9; i++) {
-                board[IDX(i, (base_y/3)*3+j)] &= q * ~R(j);
+        q[0] = R(0) & ~(R(1) | R(2));
+        q[1] = R(1) & ~(R(0) | R(2));
+        q[2] = R(2) & ~(R(0) | R(1));
+        for (u16 j = 0; j < 3; j++) {
+            for (u16 i = 0; i < 9 * (q[j]>0); i++) {
+                board[IDX(i, (base_y/3)*3+j)] &= ~q[j];
+                _set = 1;
             }
         }
 
+#define DEBUG_SQUARE_RULE   1
+#if DEBUG_SQUARE_RULE
+        #define DEBUG_U16(x) {\
+            u8 string[17];\
+            for (u8 i=0; i<16; i++) string[15-i] = '0' + ((x>>i)&0x0001);\
+            string[16] = 0;\
+            printf("%s", &string[0]);\
+        }
+
+        printf("\n\n---------------------- %u %u ----------------------\n", base_x, base_y);
+
+        printf("b  :: ");
+        DEBUG_U16(board[base_idx]);
+        printf("\n\n");
+
+        printf("r1 :: ");
+        DEBUG_U16(R(0));
+        printf("    q1 :: ");
+        DEBUG_U16(q[0]);
+        printf("\n");
+
+        printf("r2 :: ");
+        DEBUG_U16(R(1));
+        printf("    q2 :: ");
+        DEBUG_U16(q[1]);
+        printf("\n");
+
+        printf("r3 :: ");
+        DEBUG_U16(R(2));
+        printf("    q3 :: ");
+        DEBUG_U16(q[2]);
+        printf("\n\n");
+#endif
 
         // propagate removals through cols
-        p1 = C(0) & C(1);
-        p2 = C(0) & C(2);
-        p3 = C(1) & C(2);
-        q  = !(p1 | p2 | p3);
-        for (u16 j = 0; j < 3 * q; j++) {
-            for (u16 i = 0; i < 9; i++) {
-                board[IDX((base_x/3)*3+j, i)] &= q * ~C(j);
+        q[0] = C(0) & ~(C(1) | C(2));
+        q[1] = C(1) & ~(C(0) | C(2));
+        q[2] = C(2) & ~(C(0) | C(1));
+        for (u16 j = 0; j < 3; j++) {
+            for (u16 i = 0; i < 9 * (q[j]>0); i++) {
+                board[IDX((base_x/3)*3+j, i)] &= ~q[j];
             }
         }
 
+#if DEBUG_SQUARE_RULE
+        printf("c1 :: ");
+        DEBUG_U16(C(0));
+        printf("    q1 :: ");
+        DEBUG_U16(q[0]);
+        printf("\n");
 
-        INK();
+        printf("c2 :: ");
+        DEBUG_U16(C(1));
+        printf("    q2 :: ");
+        DEBUG_U16(q[1]);
+        printf("\n");
+
+        printf("c3 :: ");
+        DEBUG_U16(C(2));
+        printf("    q3 :: ");
+        DEBUG_U16(q[2]);
+        printf("\n");
+
+        if (_set) return PROGRESS_DEBUG;
+#endif
 
         #undef R
         #undef C
+
+        INK();
     }
 
     // check row
@@ -1115,6 +1173,133 @@ void generate_puzzle(u16* board) {
 
 
 void main() {
+    // Rasterize Font
+    #define PATH_TTF_FONT "./res/LemonMilk.otf"
+
+    #define FONT_DIM      128
+    #define FONT_WIDTH    FONT_DIM * 9
+
+    u8* font_data = (u8*) malloc(FONT_WIDTH * FONT_DIM);
+    for (u32 i = 0; i < FONT_WIDTH*FONT_DIM; i++) {
+        font_data[i] = 0;
+    }
+
+    {
+        u64 length;
+        FILE* font_file = fopen(PATH_TTF_FONT, "rb");
+
+        fseek(font_file, 0, SEEK_END);
+        length = ftell(font_file);
+        fseek(font_file, 0, SEEK_SET);
+
+        u8* font_file_contents = (u8*) malloc(length + 1);
+        fread(font_file_contents, 1, length, font_file);
+        fclose(font_file);
+        font_file_contents[length] = '\0';
+
+        stbtt_fontinfo font;
+        stbtt_InitFont(&font, font_file_contents, stbtt_GetFontOffsetForIndex(font_file_contents, 0));
+
+        i32 width;
+        i32 height;
+        i32 x_offset;
+        i32 y_offset;    
+        u8* bitmap;
+        for (u32 font_idx = 0; font_idx < 9; font_idx++)
+        {
+            
+            bitmap = stbtt_GetCodepointBitmap(&font, 0, stbtt_ScaleForPixelHeight(&font, FONT_DIM),
+                                                          font_idx + '1', 
+                                                          &width, 
+                                                          &height, 
+                                                          &x_offset, 
+                                                          &y_offset);
+            
+            for (u32 j = 0; j < height; j++) {
+                for (u32 i = 0; i < width; i++) {
+                    u32 idx = font_idx*FONT_DIM +   // center top row to font index
+                              ((j + (FONT_DIM/2 - height/2)) * FONT_WIDTH) +
+                              (i + (FONT_DIM/2 - width/2) + x_offset);
+                    font_data[idx] = bitmap[(j*width) + i];
+                }
+            }
+
+            free(bitmap);
+        }
+
+        free(font_file_contents);
+
+    }
+
+
+    
+    // pre-compute pattern traversal arrays
+    {
+        #define BREAK  if (n > 80) break
+        #define SET(i) patterns[i][n][0] = x; patterns[i][n][1] = y; n++
+
+        // INNER SPIRAL --------
+        u8 n = 0, x = 4, y = 4;
+        SET(PATTERN_SPIRAL_INNER);
+        
+        u8 c = 1;
+        while (n < 81) {
+            /*  up  */ for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_INNER); BREAK; } BREAK;
+            /* left */ for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_INNER); }
+            c++;                                      
+                                                      
+            /*  down */ for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_INNER); }
+            /* right */ for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_INNER); }
+            c++;
+        }
+
+        // OUTER SPIRAL --------
+        n = 0, x = 9, y = 0;
+        
+        c = 9;
+        while (n < 81) {
+            /* left */ for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_OUTER); BREAK; } BREAK;
+            c--;       
+
+            /*  down */ for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_OUTER); }
+            /* right */ for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_OUTER); }
+            c--;
+
+            /* up */ for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_OUTER); }
+        }
+
+        #undef BREAK
+        #undef SET
+    }
+    {
+        // ROW SNAKE -----
+        u8 n = 0;
+        u8 dir = 0;
+        for (u8 y = 0; y < 9; y++) {
+            for (u8 x = 0; x < 9; x++) {
+                if (!dir) patterns[PATTERN_ROW_SNAKE][n][0] = x;
+                else      patterns[PATTERN_ROW_SNAKE][n][0] = 8 - x;
+                patterns[PATTERN_ROW_SNAKE][n][1] = y;
+                n++;
+            }
+            dir = (dir+1)%2;
+        }
+
+        // COL SNAKE -----
+        n = 0;
+        dir = 1;
+        for (u8 x = 0; x < 9; x++) {
+            for (u8 y = 0; y < 9; y++) {
+                patterns[PATTERN_COL_SNAKE][n][0] = x;
+                if (!dir) patterns[PATTERN_COL_SNAKE][n][1] = y;
+                else      patterns[PATTERN_COL_SNAKE][n][1] = 8 - y;
+                n++;
+            }
+            dir = (dir+1)%2;
+        }
+    }
+
+
     // Setup GLFW window
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit()) return;
@@ -1208,63 +1393,6 @@ void main() {
 
 
     // textures
-    #define PATH_TTF_FONT "./res/LemonMilk.otf"
-
-    #define FONT_DIM      128
-    #define FONT_WIDTH    FONT_DIM * 9
-
-    u8* font_data = (u8*) malloc(FONT_WIDTH * FONT_DIM);
-    for (u32 i = 0; i < FONT_WIDTH*FONT_DIM; i++) {
-        font_data[i] = 0;
-    }
-
-    {
-        u64 length;
-        FILE* font_file = fopen(PATH_TTF_FONT, "rb");
-
-        fseek(font_file, 0, SEEK_END);
-        length = ftell(font_file);
-        fseek(font_file, 0, SEEK_SET);
-
-        u8* font_file_contents = (u8*) malloc(length + 1);
-        fread(font_file_contents, 1, length, font_file);
-        fclose(font_file);
-        font_file_contents[length] = '\0';
-
-        stbtt_fontinfo font;
-        stbtt_InitFont(&font, font_file_contents, stbtt_GetFontOffsetForIndex(font_file_contents, 0));
-
-        i32 width;
-        i32 height;
-        i32 x_offset;
-        i32 y_offset;    
-        u8* bitmap;
-        for (u32 font_idx = 0; font_idx < 9; font_idx++)
-        {
-            
-            bitmap = stbtt_GetCodepointBitmap(&font, 0, stbtt_ScaleForPixelHeight(&font, FONT_DIM),
-                                                          font_idx + '1', 
-                                                          &width, 
-                                                          &height, 
-                                                          &x_offset, 
-                                                          &y_offset);
-            
-            for (u32 j = 0; j < height; j++) {
-                for (u32 i = 0; i < width; i++) {
-                    u32 idx = font_idx*FONT_DIM +   // center top row to font index
-                              ((j + (FONT_DIM/2 - height/2)) * FONT_WIDTH) +
-                              (i + (FONT_DIM/2 - width/2) + x_offset);
-                    font_data[idx] = bitmap[(j*width) + i];
-                }
-            }
-
-            free(bitmap);
-        }
-
-        free(font_file_contents);
-
-    }
-
     GLuint tex_font;
     glGenTextures(1, &tex_font);
     glBindTexture(GL_TEXTURE_2D, tex_font);
@@ -1361,72 +1489,6 @@ void main() {
     mat4 scale_mouse;
     identity(&scale_mouse);
 
-    
-    // pre-compute pattern traversal arrays
-    {
-        #define BREAK  if (n > 80) break
-        #define SET(i) patterns[i][n][0] = x; patterns[i][n][1] = y; n++
-
-        // INNER SPIRAL --------
-        u8 n = 0, x = 4, y = 4;
-        SET(PATTERN_SPIRAL_INNER);
-        
-        u8 c = 1;
-        while (n < 81) {
-            /*  up  */ for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_INNER); BREAK; } BREAK;
-            /* left */ for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_INNER); }
-            c++;                                      
-                                                      
-            /*  down */ for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_INNER); }
-            /* right */ for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_INNER); }
-            c++;
-        }
-
-        // OUTER SPIRAL --------
-        n = 0, x = 9, y = 0;
-        
-        c = 9;
-        while (n < 81) {
-            /* left */ for (u8 i=0; i<c; i++) { x--; SET(PATTERN_SPIRAL_OUTER); BREAK; } BREAK;
-            c--;       
-
-            /*  down */ for (u8 i=0; i<c; i++) { y++; SET(PATTERN_SPIRAL_OUTER); }
-            /* right */ for (u8 i=0; i<c; i++) { x++; SET(PATTERN_SPIRAL_OUTER); }
-            c--;
-
-            /* up */ for (u8 i=0; i<c; i++) { y--; SET(PATTERN_SPIRAL_OUTER); }
-        }
-
-        #undef BREAK
-        #undef SET
-    }
-    {
-        // ROW SNAKE -----
-        u8 n = 0;
-        u8 dir = 0;
-        for (u8 y = 0; y < 9; y++) {
-            for (u8 x = 0; x < 9; x++) {
-                if (!dir) patterns[PATTERN_ROW_SNAKE][n][0] = x;
-                else      patterns[PATTERN_ROW_SNAKE][n][0] = 8 - x;
-                patterns[PATTERN_ROW_SNAKE][n][1] = y;
-                n++;
-            }
-            dir = (dir+1)%2;
-        }
-
-        // COL SNAKE -----
-        n = 0;
-        dir = 1;
-        for (u8 x = 0; x < 9; x++) {
-            for (u8 y = 0; y < 9; y++) {
-                patterns[PATTERN_COL_SNAKE][n][0] = x;
-                if (!dir) patterns[PATTERN_COL_SNAKE][n][1] = y;
-                else      patterns[PATTERN_COL_SNAKE][n][1] = 8 - y;
-                n++;
-            }
-            dir = (dir+1)%2;
-        }
-    }
 
 
     // timing
@@ -1447,8 +1509,6 @@ void main() {
 
     i64 render_wait_us  = pow_10[6] / monitor_rate;
     i64 render_timer_us = render_wait_us;
-
-
 
 
 
@@ -1502,6 +1562,7 @@ void main() {
 
     u16 board_iterations   = 0;
     u16 stagnation_counter = 0xFFFF; 
+
 
     while (!glfwWindowShouldClose(window))
     {
@@ -2046,9 +2107,20 @@ void main() {
                     }
 
                     // set AI cursor
-                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL) {
+                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL || status == PROGRESS_DEBUG) {
                         stagnation_counter = 0xFFFF;
                     } 
+
+                    // exit
+                    if (status == PROGRESS_DEBUG) {
+                        solve_wait_us     = solve_true_us;
+                        waiting_for_solve = false;
+                        board_iterations  = 0xFFFF;
+
+                        pattern_idx   = 0;
+                        ai_logic_idx  = 0;
+                        break;
+                    }
 
                     // p1: no state change => time to give up
                     // p3: board solved => time to stop
