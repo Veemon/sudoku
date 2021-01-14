@@ -640,7 +640,7 @@ u8 fast_solve(u16* board) {
 
 
 // NOTE: this procedure is aesthetics > function
-u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
+u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
     u8 state_change = PROGRESS_DEFAULT;
 
     // skip statics and already set cells
@@ -651,6 +651,17 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
         if (cell_static || !cell_pencil) return PROGRESS_INV_CELL;
     }
 
+
+#define DEBUG_SQUARE_RULE   1
+#if DEBUG_SQUARE_RULE
+        #define DEBUG_U16(x) {\
+            u8 string[17];\
+            for (u8 i=0; i<16; i++) string[15-i] = '0' + ((x>>i)&0x0001)*(i+1);\
+            string[16] = 0;\
+            printf("%s", &string[0]);\
+        }
+#endif
+
     u16 cache = 0;
 
     // check square
@@ -659,6 +670,12 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
         #define C(i)   sq_cache[3+i]
         u16 sq_cache[6]; // caches 3 rows + 3 cols
         for (u8 i = 0; i < 6; i++) sq_cache[i] = 0;
+
+#if DEBUG_SQUARE_RULE
+    if (square_rule) {
+        printf("\n\n---------------------- %u %u ----------------------\n", base_x, base_y);
+    }
+#endif
 
         for (u16 cmp_y = 0; cmp_y < 3; cmp_y++) {
             for (u16 cmp_x = 0; cmp_x < 3; cmp_x++) {
@@ -678,8 +695,8 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
         
         // square cache base cell
         u16 digits = board[base_idx] & BOARD_ALL;
-        R(base_y/3) |= digits;
-        C(base_x/3) |= digits;
+        R(base_y%3) |= digits;
+        C(base_x%3) |= digits;
 
         /*
             -- determine if this is a row or column application
@@ -701,88 +718,104 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage) {
                0000 0000 1100 0000 :: c3    0000 0000 0000 0000 :: q3 = c3 & ~(c1 | c2)                                        
         */
 
-        u8  _set = 0;
-        u16 q[3];
-
-        // propagate removals through rows
-        q[0] = R(0) & ~(R(1) | R(2));
-        q[1] = R(1) & ~(R(0) | R(2));
-        q[2] = R(2) & ~(R(0) | R(1));
-        for (u16 j = 0; j < 3; j++) {
-            for (u16 i = 0; i < 9 * (q[j]>0); i++) {
-                board[IDX(i, (base_y/3)*3+j)] &= ~q[j];
-                _set = 1;
-            }
-        }
-
-#define DEBUG_SQUARE_RULE   1
-#if DEBUG_SQUARE_RULE
-        #define DEBUG_U16(x) {\
-            u8 string[17];\
-            for (u8 i=0; i<16; i++) string[15-i] = '0' + ((x>>i)&0x0001);\
-            string[16] = 0;\
-            printf("%s", &string[0]);\
-        }
-
-        printf("\n\n---------------------- %u %u ----------------------\n", base_x, base_y);
-
-        printf("b  :: ");
-        DEBUG_U16(board[base_idx]);
-        printf("\n\n");
-
-        printf("r1 :: ");
-        DEBUG_U16(R(0));
-        printf("    q1 :: ");
-        DEBUG_U16(q[0]);
-        printf("\n");
-
-        printf("r2 :: ");
-        DEBUG_U16(R(1));
-        printf("    q2 :: ");
-        DEBUG_U16(q[1]);
-        printf("\n");
-
-        printf("r3 :: ");
-        DEBUG_U16(R(2));
-        printf("    q3 :: ");
-        DEBUG_U16(q[2]);
-        printf("\n\n");
-#endif
-
-        // propagate removals through cols
-        q[0] = C(0) & ~(C(1) | C(2));
-        q[1] = C(1) & ~(C(0) | C(2));
-        q[2] = C(2) & ~(C(0) | C(1));
-        for (u16 j = 0; j < 3; j++) {
-            for (u16 i = 0; i < 9 * (q[j]>0); i++) {
-                board[IDX((base_x/3)*3+j, i)] &= ~q[j];
-            }
-        }
+        // NOTE: apply square rule after trivial pencils are cleared out
+        if (square_rule) {
+            u8  _set = 0;
+            u16 q[3];
+            u16 lower, upper;
 
 #if DEBUG_SQUARE_RULE
-        printf("c1 :: ");
-        DEBUG_U16(C(0));
-        printf("    q1 :: ");
-        DEBUG_U16(q[0]);
-        printf("\n");
-
-        printf("c2 :: ");
-        DEBUG_U16(C(1));
-        printf("    q2 :: ");
-        DEBUG_U16(q[1]);
-        printf("\n");
-
-        printf("c3 :: ");
-        DEBUG_U16(C(2));
-        printf("    q3 :: ");
-        DEBUG_U16(q[2]);
-        printf("\n");
-
-        if (_set) return PROGRESS_DEBUG;
+            printf("b  :: ");
+            DEBUG_U16(digits);
+            printf("\n\n");
 #endif
 
-        #undef R
-        #undef C
+
+            // skip the current square
+            lower  = base_x/3;
+            upper  = (lower + 1) * 3;
+            lower *= 3;
+
+            // propagate removals through rows
+            q[0] = R(0) & ~(R(1) | R(2));
+            q[1] = R(1) & ~(R(0) | R(2));
+            q[2] = R(2) & ~(R(0) | R(1));
+            for (u16 j = 0; j < 3; j++) {
+                for (u16 i = 0; i < 9 * (q[j]>0); i++) {
+                    if (i >= lower && i < upper) continue;
+                    board[IDX(i, (base_y/3)*3+j)] &= ~q[j];
+                    printf("removing row %u  from  %u %u\n", j, i, (base_y/3)*3+j);
+                    _set = 1;
+                }
+            }
+
+#if DEBUG_SQUARE_RULE
+            if (_set) printf("\n");
+
+            printf("r1 :: ");
+            DEBUG_U16(R(0));
+            printf("    q1 :: ");
+            DEBUG_U16(q[0]);
+            printf("\n");
+
+            printf("r2 :: ");
+            DEBUG_U16(R(1));
+            printf("    q2 :: ");
+            DEBUG_U16(q[1]);
+            printf("\n");
+
+            printf("r3 :: ");
+            DEBUG_U16(R(2));
+            printf("    q3 :: ");
+            DEBUG_U16(q[2]);
+            printf("\n\n");
+#endif
+
+            // skip the current square
+            lower  = base_y/3;
+            upper  = (lower + 1) * 3;
+            lower *= 3;
+
+            // propagate removals through cols
+            q[0] = C(0) & ~(C(1) | C(2));
+            q[1] = C(1) & ~(C(0) | C(2));
+            q[2] = C(2) & ~(C(0) | C(1));
+            for (u16 j = 0; j < 3; j++) {
+                for (u16 i = 0; i < 9 * (q[j]>0); i++) {
+                    if (i >= lower && i < upper) continue;
+                    board[IDX((base_x/3)*3+j, i)] &= ~q[j];
+                    printf("removing col %u  from  %u %u\n", j, (base_x/3)*3+j, i);
+                    _set = 1;
+                }
+            }
+
+#if DEBUG_SQUARE_RULE
+            if (_set) printf("\n");
+
+            printf("c1 :: ");
+            DEBUG_U16(C(0));
+            printf("    q1 :: ");
+            DEBUG_U16(q[0]);
+            printf("\n");
+
+            printf("c2 :: ");
+            DEBUG_U16(C(1));
+            printf("    q2 :: ");
+            DEBUG_U16(q[1]);
+            printf("\n");
+
+            printf("c3 :: ");
+            DEBUG_U16(C(2));
+            printf("    q3 :: ");
+            DEBUG_U16(q[2]);
+            printf("\n");
+
+            if (_set) return PROGRESS_DEBUG;
+#endif
+
+            #undef R
+            #undef C
+        }
 
         INK();
     }
@@ -1507,6 +1540,10 @@ void main() {
     i64 solve_wait_us  = solve_true_us;
     i64 solve_timer_us = solve_wait_us;
 
+    // FIXME
+    u8 using_stepper = 0;
+    u8 stepper = 0;
+
     i64 render_wait_us  = pow_10[6] / monitor_rate;
     i64 render_timer_us = render_wait_us;
 
@@ -1722,10 +1759,20 @@ void main() {
                     handled = 1;
                 } 
                 else if (!handled && waiting_for_solve && !event.mod && event.key < GLFW_KEY_KP_9) {
-                    // didn't press enter, then if were currently solving we should stop
-                    waiting_for_solve = false;
-                    ai_cursor_idx = 0xff;
+                    // debug
+                    if (KEY_UP(GLFW_KEY_X)) {
+                        stepper = 1;
+                        handled = 1;
+                    }
+                    else if (KEY_DOWN(GLFW_KEY_X)) {
+                    }
+                    else {
+                        // didn't press enter, then if were currently solving we should stop
+                        waiting_for_solve = false;
+                        ai_cursor_idx = 0xff;
+                    }
                 }
+
 
                 // board clear
                 if (KEY_UP(GLFW_KEY_BACKSPACE)) {
@@ -2091,36 +2138,32 @@ void main() {
 
         // make solution progress
         if (waiting_for_solve) {
-            if (solve_timer_us > solve_wait_us - 1) {
+            if ((!using_stepper && solve_timer_us > solve_wait_us - 1) || (using_stepper && stepper)) {
                 solve_timer_us -= solve_wait_us;
+                stepper = 0;
 
                 u8 status = PROGRESS_INV_CELL; 
                 while(status == PROGRESS_INV_CELL) {
                     u8  base_x    = patterns[pattern_idx][ai_logic_idx][0];
                     u8  base_y    = patterns[pattern_idx][ai_logic_idx][1];
                     ai_cursor_idx = IDX(base_x, base_y);
-                    status = make_progress(board_data, base_x, base_y, stage);
+                    status = make_progress(board_data, base_x, base_y, stage, board_iterations);
 
                     // keep track of stagnation
                     if (stagnation_counter == 0xFFFF && status == PROGRESS_DEFAULT) {
                         stagnation_counter = board_iterations;
                     }
 
+                    // debug
+                    if (status == PROGRESS_DEBUG) {
+                        status = PROGRESS_SET_CELL;
+                        using_stepper = 1;
+                    }
+
                     // set AI cursor
-                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL || status == PROGRESS_DEBUG) {
+                    if (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL) {
                         stagnation_counter = 0xFFFF;
                     } 
-
-                    // exit
-                    if (status == PROGRESS_DEBUG) {
-                        solve_wait_us     = solve_true_us;
-                        waiting_for_solve = false;
-                        board_iterations  = 0xFFFF;
-
-                        pattern_idx   = 0;
-                        ai_logic_idx  = 0;
-                        break;
-                    }
 
                     // p1: no state change => time to give up
                     // p3: board solved => time to stop
@@ -2152,6 +2195,7 @@ void main() {
                     // nothing set, retry again next iteration
                     if (status == PROGRESS_DEFAULT) {
                         solve_timer_us = solve_wait_us;
+                        stepper = 1;
                     }
 
                     if (status == PROGRESS_INV_CELL) { stage = 0; ai_logic_idx++; }
