@@ -1549,7 +1549,7 @@ void main() {
     i64 solve_timer_us = solve_wait_us;
 
     // FIXME
-    u8 using_stepper_running = 0;
+    u8 using_stepper_running = 1;
     u8 using_stepper         = 0;
     u8 stepper               = 0;
 
