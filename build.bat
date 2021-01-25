@@ -49,18 +49,28 @@ if ERRORLEVEL 1 (
 	exit /b 1
 )
 
-REM REM -- Add Icon
-REM rcedit-x64.exe %NAME%.exe --set-icon ..\res\icon.ico
-REM 
-REM REM -- Make Archive
-REM tar -cf %NAME%.zip %NAME%.exe
-REM mv %NAME%.zip ..
-REM cd ..
-REM tar -rf %NAME%.zip res
-REM tar -rf %NAME%.zip shaders
-REM mv %NAME%.zip build/%NAME%.zip
-REM cd build
+echo.
 
+:ICON
+WHERE rcedit-x64.exe >nul 2>nul
+IF %ERRORLEVEL% NEQ 0  goto ARCHIVE
+echo [Linking Icon]
+rcedit-x64.exe %NAME%.exe --set-icon ..\res\icon.ico
+
+:ARCHIVE
+if "%1" == "-d"      goto CONCLUDE
+if "%1" == "--debug" goto CONCLUDE
+echo [Packaging]
+tar -cf %NAME%.zip %NAME%.exe
+mv %NAME%.zip ..
+cd ..
+tar -rf %NAME%.zip res
+tar -rf %NAME%.zip shaders
+tar -rf %NAME%.zip README.md
+mv %NAME%.zip build/%NAME%.zip
+cd build
+
+:CONCLUDE
 move %NAME%.exe ..
 
 popd

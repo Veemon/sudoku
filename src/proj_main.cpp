@@ -472,6 +472,264 @@ u8 set_pencils(u16* board, u8 clear) {
     return statics != 81;
 }
 
+// compares cells to remove options
+u8 _deduce_cell(u16* base, u16* cmp, u16* all_cache, u16* set_cache) {
+    bool cell_static = *cmp & BOARD_FLAG_STATIC;
+    bool cell_pencil = *cmp & BOARD_FLAG_PENCIL;
+
+    *all_cache |= *cmp; /* cache all elements *except* the base element */
+
+    if (cell_static || !cell_pencil) {
+        *set_cache |= *cmp; /* cache all _set_ elements *except* base element */
+
+        u16 tmp = *base;
+        *base &= ~(*cmp & BOARD_ALL);
+        if ((tmp & BOARD_ALL) != (*base & BOARD_ALL)) {
+            return PROGRESS_STATE_CHANGE;
+        }
+    }
+
+    return PROGRESS_DEFAULT;
+}
+
+// solidifies options
+u8 _ink_cell(u16* base, u16 all_cache) {\
+    all_cache &= BOARD_ALL;
+
+    u16 check = *base & BOARD_ALL;
+    if (check && !(check & (check-1))) {
+        /*
+           0000 0000 0010 0000 :: check :: we have only 1 option
+           0000 0000 0001 1111 :: check - 1
+           0000 0000 0000 0000 :: check & (check-1)
+           0000 0000 0000 0001 :: !(check & (check-1))
+
+           0000 0000 1111 0000 :: check :: we have multiple options
+           0000 0000 1110 1111 :: check - 1
+           0000 0000 1110 0000 :: check & (check-1)
+           0000 0000 0000 0000 :: !(check & (check-1))
+        */
+        *base &= ~u16(BOARD_FLAG_PENCIL);
+        return PROGRESS_SET_CELL;
+    }
+    
+    if (all_cache < BOARD_ALL) {
+        /*
+           0000 0001 1011 1111 :: cache :: no 7's in the square/row/col
+           0000 0000 1111 0000 :: board :: we can put our 7 down
+           
+           0000 0000 1011 0000 :: board & cache
+           0000 0000 0100 0000 :: board ^ (board & cache)
+        */
+        check = *base ^ (*base & all_cache);
+        if (check & BOARD_ALL) {
+            *base &= check | ~u16(BOARD_ALL);
+            *base &= ~u16(BOARD_FLAG_PENCIL);
+            return PROGRESS_SET_CELL;
+        }
+    }
+
+    return PROGRESS_DEFAULT;
+}
+
+u8 _solve_square(u16* board, u16 base_idx, u16 base_x, u16 base_y, u8 square_rule) {
+    printf("-- stage sq  --\n");
+
+    #define R(i)   sq_cache[0+i]
+    #define C(i)   sq_cache[3+i]
+    u16 sq_cache[6]; // caches 3 rows + 3 cols
+    for (u8 i = 0; i < 6; i++) sq_cache[i] = 0;
+
+    // local square coords
+    u16 n[2];
+    n[0] = base_y % 3;
+    n[1] = base_x % 3;
+
+    u8 state_change = PROGRESS_DEFAULT;
+
+    u8  result;
+    u16 all_cache = 0;
+    u16 set_cache = 0;
+
+    for (u16 cmp_y = 0; cmp_y < 3; cmp_y++) {
+        for (u16 cmp_x = 0; cmp_x < 3; cmp_x++) {
+            u16 cmp_inner_x = (base_x/3)*3+cmp_x;
+            u16 cmp_inner_y = (base_y/3)*3+cmp_y;
+            u16 cmp_idx = IDX(cmp_inner_x, cmp_inner_y);
+            if (cmp_idx == base_idx) continue;
+
+            result = _deduce_cell(&board[base_idx], &board[cmp_idx], &all_cache, &set_cache);
+            if (result == PROGRESS_STATE_CHANGE) state_change = result;
+
+            // cache element options
+            u16 pencil = (board[cmp_idx] & BOARD_FLAG_PENCIL) > 0;
+            u16 digits = pencil * (board[cmp_idx] & BOARD_ALL);
+            R(cmp_y) |= digits;
+            C(cmp_x) |= digits;
+        }
+    }
+    set_cache &= BOARD_ALL;
+
+    // cache base cell
+    u16 digits = board[base_idx] & BOARD_ALL;
+    R(n[0]) |= digits;
+    C(n[1]) |= digits;
+
+    u16 q;
+    u16 lower, upper;
+
+    /*
+        -- determine if this is a row or column application
+
+                                            9 9                            
+                                            v v                            
+                                           +-----+                         
+                   3 7 8            7, 8 > |3 * *| ---> 7, 8 --->          
+                   5 1 2    =>             |5 1 2|                         
+                   9 6 4             3*  > |* 6 4|                        3* to indicate lingering option 
+                                           +-----+                         
+           0000 0000 0011 1111 :: set
+
+           0000 0001 1100 0000 :: r1    0000 0000 1100 0000 :: q1 = r1 & ~(r2 | r3 | set)   -- Get pencil numbers exclusive to this row
+           0000 0000 0000 0000 :: r2    0000 0000 0000 0000 :: q2 = r2 & ~(r1 | r3 | set)          
+           0000 0001 0000 0100 :: r3    0000 0000 0000 0000 :: q3 = r3 & ~(r1 | r2 | set)          
+
+           0000 0001 0000 0100 :: c1    0000 0000 0000 0000 :: q1 = c1 & ~(c2 | c3 | set)   -- Get pencil numbers exclusive to this col
+           0000 0001 1100 0000 :: c2    0000 0000 0000 0000 :: q2 = c2 & ~(c1 | c3 | set)                                        
+           0000 0000 1100 0000 :: c3    0000 0000 0000 0000 :: q3 = c3 & ~(c1 | c2 | set)                                        
+    */
+
+    if (square_rule) {
+        // skip the current square
+        lower  = base_x/3;
+        upper  = (lower + 1) * 3;
+        lower *= 3;
+
+        // propagate removals through rows
+        q = R(n[0]) & ~(R(0)*u16(n[0]!=0) | 
+                        R(1)*u16(n[0]!=1) | 
+                        R(2)*u16(n[0]!=2) | set_cache);
+
+        for (u16 i = 0; i < 9 * u16(q>0); i++) {
+            if (i >= lower && i < upper) continue;
+            u16 idx = IDX(i, (base_y/3)*3+n[0]);
+            if (board[idx] & BOARD_FLAG_PENCIL) board[idx] &= ~q;
+        }
+    }
+
+    if (square_rule) {
+        // skip the current square
+        lower  = base_y/3;
+        upper  = (lower + 1) * 3;
+        lower *= 3;
+
+        // propagate removals through cols
+        q = C(n[1]) & ~(C(0)*u16(n[1]!=0) | 
+                        C(1)*u16(n[1]!=1) | 
+                        C(2)*u16(n[1]!=2) | set_cache);
+
+        for (u16 i = 0; i < 9 * u16(q>0); i++) {
+            if (i >= lower && i < upper) continue;
+            u16 idx = IDX((base_x/3)*3+n[1], i);
+            if (board[idx] & BOARD_FLAG_PENCIL) board[idx] &= ~q;
+        }
+    }
+
+    #undef R
+    #undef C
+
+    result = _ink_cell(&board[base_idx], all_cache);
+    if (result == PROGRESS_SET_CELL) state_change = result;
+    return state_change;
+}
+
+u8 _solve_row(u16* board, u16 base_idx, u16 base_y) {
+    printf("-- stage row --\n");
+
+    u8 state_change = PROGRESS_DEFAULT;
+
+    u8  result;
+    u16 all_cache = 0;
+    u16 set_cache = 0;
+
+    // remove possible options from cell
+    for (u16 cmp_x = 0; cmp_x < 9; cmp_x++) {
+        u16 cmp_idx = IDX(cmp_x, base_y);
+        if (cmp_idx == base_idx) continue;
+        result = _deduce_cell(&board[base_idx], &board[cmp_idx], &all_cache, &set_cache);
+        if (result == PROGRESS_STATE_CHANGE) state_change = result;
+    }
+
+    // set cell if possible
+    result = _ink_cell(&board[base_idx], all_cache);
+    if (result == PROGRESS_SET_CELL) state_change = result;
+
+    // clear row
+    if (state_change == PROGRESS_SET_CELL) {
+        u16 digit = board[base_idx] & BOARD_ALL;
+        for (u16 i = 0; i < 9; i++) {
+            u16 idx = IDX(i, base_y);
+            if (board[idx] & BOARD_FLAG_PENCIL) board[idx] &= ~digit;
+        }
+        board[base_idx] |= digit;
+    }
+
+    return state_change;
+}
+
+u8 _solve_col(u16* board, u16 base_idx, u16 base_x) {
+    printf("-- stage col --\n");
+
+    u8 state_change = PROGRESS_DEFAULT;
+
+    u8  result;
+    u16 all_cache = 0;
+    u16 set_cache = 0;
+
+    // remove possible options from cell
+    for (u16 cmp_y = 0; cmp_y < 9; cmp_y++) {
+        u16 cmp_idx = IDX(base_x, cmp_y);
+        if (cmp_idx == base_idx) continue;
+        result = _deduce_cell(&board[base_idx], &board[cmp_idx], &all_cache, &set_cache);
+        if (result == PROGRESS_STATE_CHANGE) state_change = result;
+    }
+
+    // set cell if possible
+    result = _ink_cell(&board[base_idx], all_cache);
+    if (result == PROGRESS_SET_CELL) state_change = result;
+
+    // clear col
+    if (state_change == PROGRESS_SET_CELL) {
+        u16 digit = board[base_idx] & BOARD_ALL;
+        for (u16 i = 0; i < 9; i++) {
+            u16 idx = IDX(base_x, i);
+            if (board[idx] & BOARD_FLAG_PENCIL) board[idx] &= ~digit;
+        }
+        board[base_idx] |= digit;
+    }
+
+    return state_change;
+}
+
+
+// NOTE: this procedure is aesthetics > function
+u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
+    // skip statics and already set cells
+    u16 base_idx = IDX(base_x, base_y);
+    {
+        bool cell_static = board[base_idx] & BOARD_FLAG_STATIC;
+        bool cell_pencil = board[base_idx] & BOARD_FLAG_PENCIL;
+        if (cell_static || !cell_pencil) return PROGRESS_INV_CELL;
+    }
+
+    if (stage == 0) return _solve_square(board, base_idx, base_x, base_y, square_rule);
+    if (stage == 1) return _solve_row(board, base_idx, base_y);
+    if (stage == 2) return _solve_col(board, base_idx, base_x);
+
+    return PROGRESS_DEFAULT;
+}
+
+
 /*
 FIXME
 implement tree search for something like this,
@@ -598,262 +856,6 @@ u8 fast_solve(u16* board) {
 }
 
 
-// FIXME - options aren't removed?
-// compares cells to remove options
-#define DEDUCE() {\
-    bool cell_static = board[cmp_idx] & BOARD_FLAG_STATIC;\
-    bool cell_pencil = board[cmp_idx] & BOARD_FLAG_PENCIL;\
-    \
-    cache |= board[cmp_idx]; /* cache all elements *except* the base element */\
-    \
-    if (cell_static || !cell_pencil) {\
-        set_cache |= board[cmp_idx]; /* cache all _set_ elements *except* base element */\
-        \
-        u16 tmp = board[base_idx] & BOARD_ALL;\
-        board[base_idx] &= ~(board[cmp_idx] & BOARD_ALL);\
-        if (tmp != (board[base_idx] & BOARD_ALL)) {\
-            state_change = PROGRESS_STATE_CHANGE;\
-        }\
-    }\
-}
-
-// solidifies options
-#define INK() {\
-    cache &= BOARD_ALL;\
-    \
-    u16 check = board[base_idx] & BOARD_ALL;\
-    if (check && !(check & (check-1))) {\
-        /*
-           0000 0000 0010 0000 :: check :: we have only 1 option
-           0000 0000 0001 1111 :: check - 1
-           0000 0000 0000 0000 :: check & (check-1)
-           0000 0000 0000 0001 :: !(check & (check-1))
-
-           0000 0000 1111 0000 :: check :: we have multiple options
-           0000 0000 1110 1111 :: check - 1
-           0000 0000 1110 0000 :: check & (check-1)
-           0000 0000 0000 0000 :: !(check & (check-1))
-        */\
-        board[base_idx] &= ~u16(BOARD_FLAG_PENCIL);\
-        state_change     = PROGRESS_SET_CELL;\
-    } else if (cache < BOARD_ALL){\
-        /*
-           FIXME -- ablation_2 shows this failing
-           0000 0001 1011 1111 :: cache :: no 7's in the square/row/col
-           0000 0000 1111 0000 :: board :: we can put our 7 down
-           
-           0000 0000 1011 0000 :: board & cache
-           0000 0000 0100 0000 :: board ^ (board & cache)
-        */\
-        u16 changed = board[base_idx] ^ (board[base_idx] & cache);\
-        if (changed & BOARD_ALL) {\
-            board[base_idx] &= changed | ~u16(BOARD_ALL);\
-            board[base_idx] &= ~u16(BOARD_FLAG_PENCIL);\
-            state_change     = PROGRESS_SET_CELL;\
-        }\
-    }\
-    if (state_change == PROGRESS_SET_CELL) {\
-        /*
-           Clears rows and cols if cell is set
-        */\
-        u16 digit = board[base_idx] & BOARD_ALL;\
-        for (u16 _i = 0; _i < 9; _i++) {\
-            u16 _idx = IDX(_i, base_y);\
-            if (board[_idx] & BOARD_FLAG_PENCIL) board[_idx] &= ~digit;\
-        }\
-        for (u16 _i = 0; _i < 9; _i++) {\
-            u16 _idx = IDX(base_x, _i);\
-            if (board[_idx] & BOARD_FLAG_PENCIL) board[_idx] &= ~digit;\
-        }\
-        board[base_idx] |= digit;\
-    }\
-}
-
-
-// NOTE: this procedure is aesthetics > function
-u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
-    u8 state_change = PROGRESS_DEFAULT;
-
-    // skip statics and already set cells
-    u16 base_idx = IDX(base_x, base_y);
-    {
-        bool cell_static = board[base_idx] & BOARD_FLAG_STATIC;
-        bool cell_pencil = board[base_idx] & BOARD_FLAG_PENCIL;
-        if (cell_static || !cell_pencil) return PROGRESS_INV_CELL;
-    }
-
-
-    u16 cache = 0;     // caches all digits *except* base element
-    u16 set_cache = 0; // caches static and inked values *except* base element
-
-    // check square - FIXME
-    if (stage == 0) {
-        printf("-- stage sq  --\n");
-
-        // local square coords
-        u16 n[2];
-        n[0] = base_y % 3;
-        n[1] = base_x % 3;
-
-        #define R(i)   sq_cache[0+i]
-        #define C(i)   sq_cache[3+i]
-        u16 sq_cache[6]; // caches 3 rows + 3 cols
-        for (u8 i = 0; i < 6; i++) sq_cache[i] = 0;
-
-        for (u16 cmp_y = 0; cmp_y < 3; cmp_y++) {
-            for (u16 cmp_x = 0; cmp_x < 3; cmp_x++) {
-                u16 cmp_inner_x = (base_x/3)*3+cmp_x;
-                u16 cmp_inner_y = (base_y/3)*3+cmp_y;
-                u16 cmp_idx = IDX(cmp_inner_x, cmp_inner_y);
-                if (cmp_idx == base_idx) continue;
-                DEDUCE();
-
-                // cache element options
-                u16 pencil = (board[cmp_idx] & BOARD_FLAG_PENCIL) > 0;
-                u16 digits = pencil * (board[cmp_idx] & BOARD_ALL);
-                R(cmp_y) |= digits;
-                C(cmp_x) |= digits;
-            }
-        }
-        set_cache &= BOARD_ALL;
-
-        // cache base cell
-        u16 digits = board[base_idx] & BOARD_ALL;
-        R(n[0]) |= digits;
-        C(n[1]) |= digits;
-
-        u8 _set = 0; // FIXME
-
-        u16 q;
-        u16 lower, upper;
-
-        if (0) {
-            // skip the current square
-            lower  = base_x/3;
-            upper  = (lower + 1) * 3;
-            lower *= 3;
-
-            // propagate removals through rows
-            q = R(n[0]) & ~(R(0)*u16(n[0]!=0) | 
-                            R(1)*u16(n[0]!=1) | 
-                            R(2)*u16(n[0]!=2) | set_cache);
-            for (u16 i = 0; i < 9 * u16(q>0); i++) {
-                _set = 1;
-                if (i >= lower && i < upper) {
-                    printf("[%u %u] self square -- skipping %u %u\n", base_x, base_y, i, (base_y/3)*3+n[0]);
-                    continue;
-                }
-                u16 idx = IDX(i, (base_y/3)*3+n[0]);
-                if (board[idx] & BOARD_FLAG_PENCIL) {
-
-                    // FIXME - sometimes we end up with squares that have no options?
-
-                    printf("[%u %u] removing row %u :: from  %u %u  -  ", base_x, base_y, n[0], i, (base_y/3)*3+n[0]);
-                    DEBUG_U16(board[idx]); printf("  ");
-                    DEBUG_U16(q); printf("  ");
-
-                    board[idx] &= ~q;
-                    if (!(board[idx] & BOARD_ALL)) {
-                        printf("\n\n -- ROW error\n\n  => ");
-                        exit(-1);
-                    }
-
-                    DEBUG_U16(board[idx]);
-                    printf("\n");
-                } else {
-                    printf("[%u %u] non pencil  -- skipping %u %u\n", base_x, base_y, i, (base_y/3)*3+n[0]);
-                    continue;
-                }
-            }
-            if (_set) printf("\n");
-        }
-
-        if (0) {
-            // skip the current square
-            lower  = base_y/3;
-            upper  = (lower + 1) * 3;
-            lower *= 3;
-
-            // FIXME -- set_cache broken?
-            // propagate removals through cols
-            q = C(n[1]) & ~(C(0)*u16(n[1]!=0) | 
-                            C(1)*u16(n[1]!=1) | 
-                            C(2)*u16(n[1]!=2) | set_cache);
-
-            if (q > 0) {
-                printf("[%u %u]  --  set :: ", base_x, base_y);
-                DEBUG_U16(set_cache);
-                printf("\n");
-            }
-
-            for (u16 i = 0; i < 9 * u16(q>0); i++) {
-                _set = 1;
-                if (i >= lower && i < upper) continue;
-                u16 idx = IDX((base_x/3)*3+n[1], i);
-                if (board[idx] & BOARD_FLAG_PENCIL) {
-
-                    // FIXME - sometimes we end up with squares that have no options?
-
-                    printf("[%u %u] removing col %u :: from  %u %u  -  ", base_x, base_y, n[1], (base_x/3)*3+n[1], i);
-                    DEBUG_U16(board[idx]); printf("  ");
-                    DEBUG_U16(q); printf("  ");
-
-                    board[idx] &= ~q;
-                    if (!(board[idx] & BOARD_ALL)) {
-                        printf("\n\n -- COLUMN error\n\n  => ");
-                    }
-
-                    DEBUG_U16(board[idx]);
-                    printf("\n");
-                }
-            }
-            if (_set) printf("\n");
-        }
-
-        INK();
-
-        if (_set) return PROGRESS_DEBUG;
-
-        #undef R
-        #undef C
-    }
-
-
-
-
-    // check row
-    if (stage == 1) {
-        printf("-- stage row --\n");
-        for (u32 cmp_x = 0; cmp_x < 9; cmp_x++) {
-            u16 cmp_idx = IDX(cmp_x, base_y);
-            DEDUCE();
-        }
-        INK();
-    }
-
-    // check col
-    if (stage == 2) {
-        printf("-- stage col --\n");
-        for (u16 cmp_y = 0; cmp_y < 9; cmp_y++) {
-            u16 cmp_idx = IDX(base_x, cmp_y);
-            DEDUCE();
-        }
-        INK();
-    }
-
-    // FIXME - we often get ERRORS before the square rule applicaiton
-    for (u16 y = 0; y < 9; y++) {
-        for (u16 x = 0; x < 9; x++) {
-            u16 idx = IDX(x,y);
-            if (!(board[idx] & BOARD_ALL)) {
-                printf("\n\n -- NON SQUARE error\n\n");
-                return PROGRESS_DEBUG;
-            }
-        }
-    }
-
-    return state_change;
-}
 
 
 
@@ -1073,6 +1075,22 @@ const u8 puzzles[16][81] = {
     }
 };
 
+#define ACCEPTED_TRIALS     18
+#define ACCEPTED_FAILS      45
+#define OUTPUT_BOARD() {\
+    for (u32 y = 0; y < 9; y++) {\
+        for (u32 x = 0; x < 9; x++) {\
+            u16 val = board[IDX(x,y)];\
+            if (val & BOARD_FLAG_PENCIL) { printf("0 "); continue; }\
+            val &= BOARD_ALL;\
+            u8 d;\
+            for (d = 0; d < 9; d++) { if ((val>>d) & 0x1) break; }\
+            printf("%u ", (d+1)%10);\
+        }\
+        printf("\n");\
+    }\
+    printf("\n");\
+}
 
 void swap_col(u16* board, u8 a, u8 b) {
     for (u8 i = 0; i < 9; i++) {
@@ -1126,31 +1144,15 @@ void generate_puzzle(u16* board) {
         else               swap_col(board, a, b);
     }
 
-
-    // hide tiles until puzzle cannot be solved in N board iterations
-    #define N               18
-    #define ACCEPTED_FAILS  45
-    #define OUTPUT_BOARD() {\
-        for (u32 y = 0; y < 9; y++) {\
-            for (u32 x = 0; x < 9; x++) {\
-                u16 val = board[IDX(x,y)];\
-                if (val & BOARD_FLAG_PENCIL) { printf("0 "); continue; }\
-                val &= BOARD_ALL;\
-                u8 d;\
-                for (d = 0; d < 9; d++) { if ((val>>d) & 0x1) break; }\
-                printf("%u ", (d+1)%10);\
-            }\
-            printf("\n");\
-        }\
-        printf("\n");\
-    }
-
+#if 0
     printf("-- Solution\n");
     OUTPUT_BOARD();
     printf("\n");
+#endif
 
     u8 pattern_idx = rand() % N_PATTERNS;
 
+    // hide tiles until puzzle cannot be solved in N board iterations
     u32  hidden[81] = {0};
     u8   hidden_idx = 0;
     u32  fails = 0;
@@ -1167,7 +1169,7 @@ void generate_puzzle(u16* board) {
 
         u8 solved = 0;
         set_pencils(board, 1);
-        for (u32 n = 0; n < N; n++) {
+        for (u32 n = 0; n < ACCEPTED_TRIALS; n++) {
 #if 0
             // - solve with patterns
             for (u8 i = 0; i < 81; i++) {
@@ -1215,10 +1217,6 @@ void generate_puzzle(u16* board) {
         }
 
     }
-
-    #undef N
-    #undef ACCEPTED_FAILS
-    #undef OUTPUT_BOARD
 }
 
 
@@ -1757,11 +1755,17 @@ void main() {
                                 }
                             }
                             if (waiting_for_solve) {
-
                                 if (event.mod & GLFW_MOD_CONTROL) {
-                                    // FIXME
-                                    printf("[Main]  --- you should implement insta solve here :)\n");
+                                    // instant solve
+                                    set_pencils(board_data, !(event.mod & GLFW_MOD_SHIFT));
+                                    for (u32 n = 0; n < ACCEPTED_TRIALS; n++) {
+                                        u8 solved = fast_solve(board_data);
+                                        if (solved) break;
+                                    }
+                                    waiting_for_solve = false;
+                                    board_input       = 1;
                                 } else {
+                                    // progressive solve
                                     solve_wait_us = solve_true_us;
 
                                     ai_logic_idx     = 0;
@@ -1778,26 +1782,56 @@ void main() {
                     handled = 1;
                 } 
 
-                // FIXME -- Ctrl n + enter + ctrl-n (while solving) will segfault. this catch SUCKS
-                else if (!handled && waiting_for_solve && IS_KEY_UP && !event.mod && event.key < GLFW_KEY_KP_9) {
+                // didn't press enter, then if were currently solving we should stop
+                if (!handled && waiting_for_solve && IS_KEY_UP && !event.mod && event.key < GLFW_KEY_KP_9) {
                     // debug
-                    if (KEY_UP(GLFW_KEY_X)) {
-                        stepper = 1;
-                        handled = 1;
-                    }
+                    if (KEY_UP(GLFW_KEY_X)) stepper = 1;
                     else {
                         printf("disabled solve\n");
-                        // didn't press enter, then if were currently solving we should stop
-                        using_stepper = 0;
+                        using_stepper     = 0;
                         waiting_for_solve = false;
-                        ai_cursor_idx = 0xff;
-                        handled = 1;
+                        ai_cursor_idx     = 0xff;
                     }
+                    handled = 1;
                 }
+
+#define DEBUG_PROGRESSIVE_SOLVE     0
+#if DEBUG && DEBUG_PROGRESSIVE_SOLVE
+                // pencil
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_1)) {
+                    set_pencils(board_data, 1);
+                    board_input = 1;
+                    handled = 1;
+                }
+
+                // square check
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_2)) {
+                    u16 base_idx = IDX(cursor_x, cursor_y);
+                    _solve_square(board_data, base_idx, cursor_x, cursor_y, 1);
+                    board_input = 1;
+                    handled = 1;
+                }
+
+                // row check
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_3)) {
+                    u16 base_idx = IDX(cursor_x, cursor_y);
+                    _solve_row(board_data, base_idx, cursor_y);
+                    board_input = 1;
+                    handled = 1;
+                }
+
+                // col check
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_UP(GLFW_KEY_4)) {
+                    u16 base_idx = IDX(cursor_x, cursor_y);
+                    _solve_col(board_data, base_idx, cursor_x);
+                    board_input = 1;
+                    handled = 1;
+                }
+#endif
 
 
                 // board clear
-                if (KEY_UP(GLFW_KEY_BACKSPACE)) {
+                if (!handled && KEY_UP(GLFW_KEY_BACKSPACE)) {
                     for (u32 i = 0; i < BOARD_SIZE; i++) {
                         board_data[i] = BOARD_EMPTY;
                     }
@@ -1854,7 +1888,7 @@ void main() {
                 }
 
                 // digit placement
-                if (!handled && IS_KEY_DOWN) {
+                if (!handled && !event.mod && IS_KEY_DOWN) {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
                         u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
@@ -1980,8 +2014,8 @@ void main() {
                     }
                 }
 
-#if 0
-                // FIXME - audio debug events
+#define DEBUG_AUDIO_EVENTS      0
+#if DEBUG && DEBUG_AUDIO_EVENTS
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
                     // To test the sound angle of stereo data
                     Event e;
@@ -2170,7 +2204,7 @@ void main() {
                     u8  base_x    = patterns[pattern_idx][ai_logic_idx][0];
                     u8  base_y    = patterns[pattern_idx][ai_logic_idx][1];
                     ai_cursor_idx = IDX(base_x, base_y);
-                    status = make_progress(board_data, base_x, base_y, stage, board_iterations);
+                    status = make_progress(board_data, base_x, base_y, stage, board_iterations > 3);
 
                     // debug
                     if (status == PROGRESS_DEBUG) {
