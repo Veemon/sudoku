@@ -598,16 +598,16 @@ u8 fast_solve(u16* board) {
 }
 
 
-// FIXME -- swear this doesn't work
+// FIXME - options aren't removed?
 // compares cells to remove options
 #define DEDUCE() {\
     bool cell_static = board[cmp_idx] & BOARD_FLAG_STATIC;\
     bool cell_pencil = board[cmp_idx] & BOARD_FLAG_PENCIL;\
     \
-    cache |= board[cmp_idx];\
+    cache |= board[cmp_idx]; /* cache all elements *except* the base element */\
     \
     if (cell_static || !cell_pencil) {\
-        set_cache |= board[cmp_idx];\
+        set_cache |= board[cmp_idx]; /* cache all _set_ elements *except* base element */\
         \
         u16 tmp = board[base_idx] & BOARD_ALL;\
         board[base_idx] &= ~(board[cmp_idx] & BOARD_ALL);\
@@ -638,6 +638,7 @@ u8 fast_solve(u16* board) {
         state_change     = PROGRESS_SET_CELL;\
     } else if (cache < BOARD_ALL){\
         /*
+           FIXME -- ablation_2 shows this failing
            0000 0001 1011 1111 :: cache :: no 7's in the square/row/col
            0000 0000 1111 0000 :: board :: we can put our 7 down
            
@@ -654,8 +655,6 @@ u8 fast_solve(u16* board) {
     if (state_change == PROGRESS_SET_CELL) {\
         /*
            Clears rows and cols if cell is set
-           FIXME - definitely not working properly? i've seen digits pencilled in that 
-           weren't removed from optioned squares
         */\
         u16 digit = board[base_idx] & BOARD_ALL;\
         for (u16 _i = 0; _i < 9; _i++) {\
@@ -684,11 +683,18 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
     }
 
 
-    u16 cache = 0;     // caches all digits
-    u16 set_cache = 0; // caches static and inked values
+    u16 cache = 0;     // caches all digits *except* base element
+    u16 set_cache = 0; // caches static and inked values *except* base element
 
     // check square - FIXME
     if (stage == 0) {
+        printf("-- stage sq  --\n");
+
+        // local square coords
+        u16 n[2];
+        n[0] = base_y % 3;
+        n[1] = base_x % 3;
+
         #define R(i)   sq_cache[0+i]
         #define C(i)   sq_cache[3+i]
         u16 sq_cache[6]; // caches 3 rows + 3 cols
@@ -702,7 +708,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
                 if (cmp_idx == base_idx) continue;
                 DEDUCE();
 
-                // square cache comparing pencils
+                // cache element options
                 u16 pencil = (board[cmp_idx] & BOARD_FLAG_PENCIL) > 0;
                 u16 digits = pencil * (board[cmp_idx] & BOARD_ALL);
                 R(cmp_y) |= digits;
@@ -711,12 +717,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
         }
         set_cache &= BOARD_ALL;
 
-        // local square coords
-        u16 n[2];
-        n[0] = base_y % 3;
-        n[1] = base_x % 3;
-
-        // square cache base cell
+        // cache base cell
         u16 digits = board[base_idx] & BOARD_ALL;
         R(n[0]) |= digits;
         C(n[1]) |= digits;
@@ -751,7 +752,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
                     DEBUG_U16(board[idx]); printf("  ");
                     DEBUG_U16(q); printf("  ");
 
-                    // board[idx] &= ~q;
+                    board[idx] &= ~q;
                     if (!(board[idx] & BOARD_ALL)) {
                         printf("\n\n -- ROW error\n\n  => ");
                         exit(-1);
@@ -767,7 +768,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
             if (_set) printf("\n");
         }
 
-        if (1) {
+        if (0) {
             // skip the current square
             lower  = base_y/3;
             upper  = (lower + 1) * 3;
@@ -822,6 +823,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
 
     // check row
     if (stage == 1) {
+        printf("-- stage row --\n");
         for (u32 cmp_x = 0; cmp_x < 9; cmp_x++) {
             u16 cmp_idx = IDX(cmp_x, base_y);
             DEDUCE();
@@ -831,6 +833,7 @@ u8 make_progress(u16* board, u8 base_x, u8 base_y, u8 stage, u8 square_rule) {
 
     // check col
     if (stage == 2) {
+        printf("-- stage col --\n");
         for (u16 cmp_y = 0; cmp_y < 9; cmp_y++) {
             u16 cmp_idx = IDX(base_x, cmp_y);
             DEDUCE();
