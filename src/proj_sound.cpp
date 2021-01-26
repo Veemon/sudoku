@@ -104,6 +104,8 @@ i32 wav_to_sound(const char* filename, Sound* sound) {
     #undef BIG_16
 }
 
+#define QUALITY_LINEAR   0
+#define QUALITY_CUBIC    1
 void resample_sound(Sound* sound, u32 rate, u8 quality) {
     // de-interleave data
     f32** data = (f32**) malloc(sizeof(f32*) * sound->channels);
@@ -153,7 +155,7 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
         memset(out[c], 0, size);
     }
 
-    if (quality == 0) {
+    if (quality == QUALITY_LINEAR) {
         printf("[Audio]  --  Linear Interpolation\n");
         // linear interpolation
         f64 time = f64(sound->time_us) / pow_10[6];
@@ -182,7 +184,7 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
             }
         }
     }
-    else if (quality == 1) {
+    else if (quality == QUALITY_CUBIC) {
         printf("[Audio]  --  Cubic Interpolation\n");
         // cubic interpolation
         f64 time = f64(sound->time_us) / pow_10[6];
@@ -536,11 +538,51 @@ u32 output_buffer_wasapi(WASAPI_Info* info) {
     if (info->floating_point) {
         f32* interp = (f32*) data;
         for (u32 i = 0; i < open; i++) {
+            // FIXME -- lmao if its mono
             *interp = buffers.master[0][i];
              interp++;
 
             *interp = buffers.master[1][i];
              interp++;
+
+             // TODO - this would be nice to design for at some point
+             for (u8 c = 2; c < info->mix_fmt->nChannels; c++) {
+                 *interp = 0;
+                 interp++;
+             }
+        }
+    } else {
+        // FIXME -- not tested, likewise to the floating point case, is susceptible to the same flaws.
+        if (info->mix_fmt->wBitsPerSample == 8) {
+            i8* interp = (i8*) data;
+            for (u32 i = 0; i < open; i++) {
+                *interp = buffers.master[0][i] * (1<<7);
+                 interp++;
+
+                *interp = buffers.master[1][i] * (1<<7);
+                 interp++;
+
+                 for (u8 c = 2; c < info->mix_fmt->nChannels; c++) {
+                     *interp = 0;
+                     interp++;
+                 }
+            }
+        }
+
+        if (info->mix_fmt->wBitsPerSample == 16) {
+            i16* interp = (i16*) data;
+            for (u32 i = 0; i < open; i++) {
+                *interp = buffers.master[0][i] * (1<<15);
+                 interp++;
+
+                *interp = buffers.master[1][i] * (1<<15);
+                 interp++;
+
+                 for (u8 c = 2; c < info->mix_fmt->nChannels; c++) {
+                     *interp = 0;
+                     interp++;
+                 }
+            }
         }
     }
 
@@ -577,8 +619,10 @@ void audio_loop(ThreadArgs* args) {
     // quick resample sounds to target sample_rate
     printf("[Audio] Resampling\n");
     for (u16 i = 0; i < N_SOUNDS; i++) {
-        printf(" - [%u]    %u  ->  %u\n", i, sounds[i].sample_rate, winfo.mix_fmt->nSamplesPerSec);
-        resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 1);
+        if (sounds[i].sample_rate != winfo.mix_fmt->nSamplesPerSec) {
+            printf(" - [%u]    %u  ->  %u\n", i, sounds[i].sample_rate, winfo.mix_fmt->nSamplesPerSec);
+            resample_sound(&sounds[i], winfo.mix_fmt->nSamplesPerSec, 1);
+        }
     }
 
 

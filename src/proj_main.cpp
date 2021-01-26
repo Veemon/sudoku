@@ -8,11 +8,11 @@ Handle sound variations in proj_main
     variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
 
 Make the solver smarter
- - if you see the only place for 1's in the square is in column 3,
-   propagate to the rest of column 8, removing 1's
-
-
-Extend the solver to perform graph traversals
+ - [Fast Solver] 
+   if you see the only place for 1's in the square is in column 3,
+   propagate to the rest of column 8, removing 1's. (this is in the progressive solver)
+ - [Both Solver]
+   Graph coloring traversals. (eh)
 
 XXX
 ------------------------------
@@ -817,7 +817,7 @@ u8 fast_solve(u16* board) {
     }
 
 
-    // squares
+    // squares -- TODO could add the square rule here
     for (u8 cy = 0; cy < 9; cy += 3) {
         for (u8 cx = 0; cx < 9; cx += 3) {
             statics = 0;
@@ -2022,7 +2022,7 @@ void main() {
                     }
                 }
 
-#define DEBUG_AUDIO_EVENTS      0
+#define DEBUG_AUDIO_EVENTS      1
 #if DEBUG && DEBUG_AUDIO_EVENTS
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
                     // To test the sound angle of stereo data
