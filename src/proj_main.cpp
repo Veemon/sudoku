@@ -287,6 +287,7 @@ static void scroll_callback(GLFWwindow* window, f64 xoffset, f64 yoffset) {
 #define BOARD_FLAG_HOVER   0x0800
 #define BOARD_FLAG_SOLVE   0x0400
 #define BOARD_FLAG_AI      0x0200
+#define BOARD_FLAGS        0xFE00
 
 #define BOARD_DIM        16
 #define BOARD_SIZE       (BOARD_DIM * BOARD_DIM)
@@ -523,7 +524,7 @@ u8 _ink_cell(u16* base, u16 all_cache) {\
         */
         check = *base ^ (*base & all_cache);
         if (check & BOARD_ALL) {
-            *base &= check | ~u16(BOARD_ALL);
+            *base &= check | BOARD_FLAGS;
             *base &= ~u16(BOARD_FLAG_PENCIL);
             return PROGRESS_SET_CELL;
         }
@@ -780,7 +781,7 @@ implement tree search for something like this,
                 } else {\
                     u16 changed = check ^ (check & caches[x] & BOARD_ALL);\
                     if (changed) {\
-                        board[indices[x]] &= changed | ~u16(BOARD_ALL);\
+                        board[indices[x]] &= changed | BOARD_FLAGS;\
                         board[indices[x]] &= ~u16(BOARD_FLAG_PENCIL);\
                         statics |= changed;\
                         set = 1;\
@@ -1888,19 +1889,26 @@ void main() {
                 }
 
                 // digit placement
-                if (!handled && !event.mod && IS_KEY_DOWN) {
+                if (!handled && IS_KEY_DOWN && (!event.mod || event.mod & GLFW_MOD_SHIFT)) {
                     if (event.key >= GLFW_KEY_1 && event.key <= GLFW_KEY_9) {
                         u32 idx = cursor_idx;
                         if (!(board_data[idx] & BOARD_FLAG_STATIC)) {
                             u16 target = 1 << (event.key-GLFW_KEY_1);
-                            // clear pencil flag
-                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] &= ~u16(BOARD_FLAG_PENCIL);}                              
-                            // clear digits
-                            if (!(board_data[idx] & BOARD_FLAG_PENCIL)) board_data[idx] &= (~u16(BOARD_ALL) | (board_data[idx] & target)); 
-                            // pre-empt placement
-                            if (event.mod & GLFW_MOD_SHIFT) {board_data[idx] ^= target;}                                          
-                            // toggle digit
-                            board_data[idx] ^= target;                                                                            
+                            if (event.mod & GLFW_MOD_SHIFT) {
+                                // clear pencil flag
+                                board_data[idx] &= ~u16(BOARD_FLAG_PENCIL);                          
+
+                                // force placement
+                                board_data[idx] = (board_data[idx] & BOARD_FLAGS) | target;
+                            } else {
+                                // clear digits
+                                if (!(board_data[idx] & BOARD_FLAG_PENCIL)) {
+                                    board_data[idx] &= (BOARD_FLAGS | (board_data[idx] & target)); 
+                                }
+
+                                // toggle digit
+                                board_data[idx] ^= target;
+                            }
                         }
                         handled = 1;
                         board_input = 1;
