@@ -1,9 +1,17 @@
 # Sudoku
 
-### TODO
-* Refactor and Bugfix (history segfaults, shader abstraction)
-* Finish AI-solver (graph traversal)
-* Sound-Event System
+<br>
+<p align="center">
+  <img src=res/showcase.png/>
+</p>
+
+### Demo
+## Sharing with Copy-Paste
+[![](http://img.youtube.com/vi/0kWGZ-n_1MI/0.jpg)](http://www.youtube.com/watch?v=0kWGZ-n_1MI "Demo - Copy Paste")
+## Fast Puzzle Generation
+[![](http://img.youtube.com/vi/Sl07X7QmlmY/0.jpg)](http://www.youtube.com/watch?v=Sl07X7QmlmY "Demo - Puzzle Generation")
+## Solving Sudokus
+[![](http://img.youtube.com/vi/uQZW1tpp9m4/0.jpg)](http://www.youtube.com/watch?v=uQZW1tpp9m4 "Demo - Sudoku Solver")
 
 ### Keyboard Controls 
 * `WASD` or `arrow keys` for keyboard movement
