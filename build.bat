@@ -55,7 +55,7 @@ echo.
 WHERE rcedit-x64.exe >nul 2>nul
 IF %ERRORLEVEL% NEQ 0  goto ARCHIVE
 echo [Linking Icon]
-rcedit-x64.exe %NAME%.exe --set-icon ..\res\icon.ico
+rcedit-x64.exe %NAME%.exe --set-icon ..\res\icon2.ico
 
 :ARCHIVE
 if "%1" == "-d"      goto CONCLUDE
