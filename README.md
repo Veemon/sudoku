@@ -1,10 +1,9 @@
-# Sudoku
-
 <br>
 <p align="center">
   <img src=res/showcase.png/ width="540">
 </p>
 
+# Sudoku
 ## Demo
 ### Sharing with Copy-Paste
 [![](http://img.youtube.com/vi/0kWGZ-n_1MI/0.jpg)](http://www.youtube.com/watch?v=0kWGZ-n_1MI "Demo - Copy Paste")
