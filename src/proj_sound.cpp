@@ -630,11 +630,19 @@ void audio_loop(ThreadArgs* args) {
     memset(&sounds[0], 0, sizeof(Sound) * N_SOUNDS);
     {
         Sound* ptr = &sounds[0];
-        wav_to_sound("./res/422hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_LOW);
-        wav_to_sound("./res/740hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_HIGH);
-        wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  ptr + SOUND_SWEEP);
-        wav_to_sound("./res/voice_stereo_48khz.wav",        ptr + SOUND_VOICE);
-        wav_to_sound("./res/sounds/pencil4.wav",            ptr + SOUND_PENCIL4);
+        wav_to_sound("./res/sounds/pencil_1.wav",   ptr + SOUND_PENCIL_1);
+        wav_to_sound("./res/sounds/pencil_2.wav",   ptr + SOUND_PENCIL_2);
+        wav_to_sound("./res/sounds/pencil_3.wav",   ptr + SOUND_PENCIL_3);
+        wav_to_sound("./res/sounds/pencil_4.wav",   ptr + SOUND_PENCIL_4);
+                                                        
+        wav_to_sound("./res/sounds/pen_1.wav",      ptr + SOUND_PEN_1   );
+        wav_to_sound("./res/sounds/pen_2.wav",      ptr + SOUND_PEN_2   );
+        wav_to_sound("./res/sounds/pen_3.wav",      ptr + SOUND_PEN_3   );
+        wav_to_sound("./res/sounds/pen_4.wav",      ptr + SOUND_PEN_4   );
+                                                        
+        wav_to_sound("./res/sounds/impact_1.wav",   ptr + SOUND_IMPACT_1);
+        wav_to_sound("./res/sounds/impact_2.wav",   ptr + SOUND_IMPACT_2);
+        wav_to_sound("./res/sounds/impact_3.wav",   ptr + SOUND_IMPACT_3);
     }
 
     // quick resample sounds to target sample_rate
@@ -735,6 +743,7 @@ void audio_loop(ThreadArgs* args) {
                 }
                 printf("\n");
                 #undef X
+
             }
             #undef iter
         }

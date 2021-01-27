@@ -18,12 +18,21 @@
 
 
 
-#define SOUND_SIN_LOW       0
-#define SOUND_SIN_HIGH      1
-#define SOUND_SWEEP         2
-#define SOUND_VOICE         3
-#define SOUND_PENCIL4       4
-#define N_SOUNDS            5
+#define SOUND_PENCIL_1      0
+#define SOUND_PENCIL_2      1
+#define SOUND_PENCIL_3      2
+#define SOUND_PENCIL_4      3
+
+#define SOUND_PEN_1         4
+#define SOUND_PEN_2         5
+#define SOUND_PEN_3         6
+#define SOUND_PEN_4         7
+
+#define SOUND_IMPACT_1      8
+#define SOUND_IMPACT_2      9
+#define SOUND_IMPACT_3      10
+
+#define N_SOUNDS            11
 
 struct Sound {
     u32   length;
