@@ -2,18 +2,18 @@
 
 <br>
 <p align="center">
-  <img src=res/showcase.png/>
+  <img src=res/showcase.png/ width="540">
 </p>
 
-### Demo
-## Sharing with Copy-Paste
+## Demo
+### Sharing with Copy-Paste
 [![](http://img.youtube.com/vi/0kWGZ-n_1MI/0.jpg)](http://www.youtube.com/watch?v=0kWGZ-n_1MI "Demo - Copy Paste")
-## Fast Puzzle Generation
+### Fast Puzzle Generation
 [![](http://img.youtube.com/vi/Sl07X7QmlmY/0.jpg)](http://www.youtube.com/watch?v=Sl07X7QmlmY "Demo - Puzzle Generation")
-## Solving Sudokus
+### Solving Sudokus
 [![](http://img.youtube.com/vi/uQZW1tpp9m4/0.jpg)](http://www.youtube.com/watch?v=uQZW1tpp9m4 "Demo - Sudoku Solver")
 
-### Keyboard Controls 
+## Keyboard Controls 
 * `WASD` or `arrow keys` for keyboard movement
 * `Shift+d`     to move in the direction (`d`) by a block [_Try `Shift+W` for example_]
 * `Space`       to enter pencil mode on a cell
