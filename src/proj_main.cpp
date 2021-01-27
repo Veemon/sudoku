@@ -1,13 +1,6 @@
 /*
 TODO
 ------------------------------
-Audio
- - Add sound events
- - Fix the popping on init issue
- - Handle sound variations in proj_main
-      u8 variations[N_SOUNDS];
-      variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
-
 Make the solver smarter
  - [Fast Solver] 
    if you see the only place for 1's in the square is in column 3,
@@ -548,8 +541,6 @@ u8 _ink_cell(u16* base, u16 all_cache) {\
 }
 
 u8 _solve_square(u16* board, u16 base_idx, u16 base_x, u16 base_y, u8 square_rule) {
-    printf("-- stage sq  --\n");
-
     #define R(i)   sq_cache[0+i]
     #define C(i)   sq_cache[3+i]
     u16 sq_cache[6]; // caches 3 rows + 3 cols
@@ -659,8 +650,6 @@ u8 _solve_square(u16* board, u16 base_idx, u16 base_x, u16 base_y, u8 square_rul
 }
 
 u8 _solve_row(u16* board, u16 base_idx, u16 base_y) {
-    printf("-- stage row --\n");
-
     u8 state_change = PROGRESS_DEFAULT;
 
     u8  result;
@@ -693,8 +682,6 @@ u8 _solve_row(u16* board, u16 base_idx, u16 base_y) {
 }
 
 u8 _solve_col(u16* board, u16 base_idx, u16 base_x) {
-    printf("-- stage col --\n");
-
     u8 state_change = PROGRESS_DEFAULT;
 
     u8  result;
@@ -831,7 +818,7 @@ u8 fast_solve(u16* board) {
     }
 
 
-    // squares -- TODO could add the square rule here
+    // squares -- TODO should add the square rule here
     for (u8 cy = 0; cy < 9; cy += 3) {
         for (u8 cx = 0; cx < 9; cx += 3) {
             statics = 0;
@@ -1571,8 +1558,8 @@ void main() {
     i64 solve_wait_us  = solve_true_us;
     i64 solve_timer_us = solve_wait_us;
 
-    // FIXME
-    u8 using_stepper_running = 1;
+    // DEBUG
+    u8 using_stepper_running = 1; // set this to enable the stepper
     u8 using_stepper         = 0;
     u8 stepper               = 0;
 
@@ -1618,6 +1605,8 @@ void main() {
 
     f32 total_time_at_click  = -1.0;
     f32 total_time_at_digit  = -1.0;
+
+    i64 total_time_at_prog_us = 0;
 
     i8 cursor_x = 4;
     i8 cursor_y = 4;
@@ -1683,6 +1672,8 @@ void main() {
             u8 board_undo       = 0;            // set this for a board undo
             u8 board_input      = 0;            // set this if there was a board change
             u8 board_input_type = LIST_OTHER;   // set this to LIST_SKIP if skippable in undo chain
+
+            u8 set_digit = 0;
 
 
             // mouse coords [0,dim] -> [0,1]
@@ -1774,9 +1765,33 @@ void main() {
                     if (event.mod & GLFW_MOD_SHIFT) return;
 
                     // clear digits
+                    u8 was_digit = (board_data[cursor_idx] & BOARD_ALL) > 0;
+
                     board_data[cursor_idx] = BOARD_EMPTY | BOARD_FLAG_CURSOR;
                     board_input = 1;
                     handled = 1;
+
+                    if (was_digit) {
+                        Event e;
+                        e.mode     = EventMode::start;
+                        e.layer    = 0;
+                        e.volume   = 0.011f;
+
+                        {
+                            u8 rng       = rand()%4;
+                            u8 sounds[4] = {SOUND_CLEAR_1, SOUND_CLEAR_2, SOUND_CLEAR_3, SOUND_CLEAR_4};
+                            e.sound_id   = sounds[rng];
+                        }
+
+                        // angle from board position
+                        {
+                            f32 range = 0.20f;
+                            e.angle = (1.0f - (f32(cursor_x)/8.0f)) * (1.0f - (2.0f*range)) + range;
+                        }
+
+                        ring_push(local_events, e);
+                        audio_updated = 1;
+                    }
                 }
 
                 // check - solve
@@ -1952,13 +1967,12 @@ void main() {
                             e.layer    = 0;
                             e.volume   = 0.01f;
 
-                            // TODO - apply when progressive solving
-
                             // sample from key velocity
                             if (board_data[idx] & BOARD_FLAG_PENCIL) {
                                 if (dt > 0.25)  e.sound_id = (rand() % 2) ? SOUND_PENCIL_3 : SOUND_PENCIL_4;
                                 else            e.sound_id = (rand() % 2) ? SOUND_PENCIL_1 : SOUND_PENCIL_2;
                             } else {
+                                set_digit = 1;
                                 if (dt > 0.25)  e.sound_id = (rand() % 2) ? SOUND_PEN_3 : SOUND_PEN_4;
                                 else            e.sound_id = (rand() % 2) ? SOUND_PEN_1 : SOUND_PEN_2;
                             }
@@ -2130,7 +2144,18 @@ void main() {
                 history_ptr->type     = board_input_type;
                 history_ptr->cursor_x = cursor_x;
                 history_ptr->cursor_y = cursor_y;
-                validate_board(board_data);
+                u8 won = validate_board(board_data);
+                if (won && set_digit) {
+                    Event e;
+                    e.mode     = EventMode::start;
+                    e.layer    = 0;
+                    e.sound_id = SOUND_PLAYER_WIN;
+                    e.angle    = 0.5f;
+                    e.volume   = 0.420f;
+
+                    ring_push(local_events, e);
+                    audio_updated = 1;
+                }
             }
 
         } // end of events
@@ -2173,8 +2198,66 @@ void main() {
                     // p3: board solved => time to stop
                     bool p1 = (stagnation_counter != 0xFFFF && board_iterations - stagnation_counter > 2*N_PATTERNS);
                     bool p2 = (status == PROGRESS_STATE_CHANGE || status == PROGRESS_SET_CELL);
+
+                    if (p2) {
+                        i64 dt_us = total_time_us - total_time_at_prog_us;
+
+                        Event e;
+                        e.mode   = EventMode::start;
+                        e.layer  = 0;
+
+                        // sample from solve velocity
+                        if (board_data[ai_cursor_idx] & BOARD_FLAG_PENCIL) {
+                            u8 rng = rand() % 3;
+                            u8 sounds[3] = {SOUND_PENCIL_1,SOUND_PENCIL_2,SOUND_PENCIL_3};
+                            e.sound_id = sounds[rng];
+
+                            // note: ideally you'd just have more samples but im too lazy to record
+                            if      (dt_us > 500000) e.volume = 0.0080f;
+                            else if (dt_us > 350000) e.volume = 0.0070f;
+                            else if (dt_us > 200000) e.volume = 0.0050f;
+                            else                     e.volume = 0.0037f;
+
+                        } else {
+                            u8 rng = rand() % 3;
+                            u8 sounds[3] = {SOUND_PEN_1,SOUND_PEN_2,SOUND_PEN_3};
+                            e.sound_id = sounds[rng];
+
+                            // note: ideally you'd just have more samples but im too lazy to record
+                            if      (dt_us > 500000) e.volume = 0.0070f;
+                            else if (dt_us > 350000) e.volume = 0.0055f;
+                            else if (dt_us > 200000) e.volume = 0.0033f;
+                            else                     e.volume = 0.0013f;
+                        }
+
+                        // angle from board position
+                        {
+                            f32 range = 0.12f;
+                            e.angle = (1.0f - (f32(base_x)/8.0f)) * (1.0f - (2.0f*range)) + range;
+                        }
+
+                        ring_push(local_events, e);
+                        audio_updated = 1;
+
+                        total_time_at_prog_us = total_time_us;
+                    }
+
+                    // if not time to give up and we actually did something, check for win
                     u8 p3 = 0;
                     if (!p1 && p2) p3 = validate_board(board_data);
+                    if (p3) {
+                        Event e;
+                        e.mode     = EventMode::start;
+                        e.layer    = 0;
+                        e.sound_id = SOUND_AI_WIN;
+                        e.angle    = 0.5f;
+                        e.volume   = 0.200f;
+
+                        ring_push(local_events, e);
+                        audio_updated = 1;
+                    }
+
+                    // so if stagnated, or we won, finish
                     if (p1 || p3) {
                         solve_wait_us     = solve_true_us;
                         waiting_for_solve = false;
@@ -2192,7 +2275,7 @@ void main() {
                         if (solve_wait_us < solve_min_us) {
                             solve_wait_us = solve_min_us;
                         } else {
-                            solve_wait_us *= 0.92f;
+                            solve_wait_us *= 0.94f;
                         }
                     }
 
@@ -2225,7 +2308,6 @@ void main() {
             if (audio_args.init) {
                 u32 sig = WaitForSingleObject(audio_args.mutex,0);
                 if (sig == WAIT_OBJECT_0) {
-                    printf("[Main] Copying Event Ring\n");
                     audio_updated = 0;
 
                     memcpy(audio_events, local_events, sizeof(RingBuffer));
@@ -2235,7 +2317,6 @@ void main() {
                     ring_clear(local_events);
                 }
             } else {
-                printf("[Main] Audio thread not initialized ... \n");
                 audio_updated = 0;
                 ring_clear(local_events);
             }

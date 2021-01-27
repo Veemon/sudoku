@@ -10,13 +10,16 @@ void init_buffers(u64 length) {
     for (u16 i = 0; i < N_LAYERS; i++) {
         for (u8 c = 0; c < LAYER_CHANNELS; c++) {
             buffers.layers[i][c] = (f32*) malloc(sizeof(f32) * length);
+            for (u16 j = 0; j < length; j++) buffers.layers[i][c][j] = 0.0;
         }
     }
 
     // master
     for (u8 c = 0; c < MASTER_CHANNELS; c++) {
         buffers.master[c] = (f32*) malloc(sizeof(f32) * length);
+        for (u16 i = 0; i < length; i++) buffers.master[c][i] = 0.0;
     }
+    
 }
 
 i32 ring_push(RingBuffer* rb, Event e) {
@@ -328,9 +331,7 @@ void mono_radial_from_angle(Status* status, vec4* contrib) {
 }
 
 void stereo_radial_from_angle(Status* status, vec4* contrib) {
-    // FIXME -- need to implement this still
-    printf("[Audio]  --  radial for stereo has not been implemented\n");
-
+    // FIXME -- radial for stereo has not been implemented
     while (status->angle > 2.0f + EPS) status->angle -= 2.0f;
     f32 angle = status->angle;
 
@@ -339,10 +340,10 @@ void stereo_radial_from_angle(Status* status, vec4* contrib) {
     f32* rl = &contrib->z;
     f32* r  = &contrib->w;
 
-    *l  = 1.0;
+    *l  = status->volume;
     *lr = 0.0;
     *rl = 0.0;
-    *r  = 1.0;
+    *r  = status->volume;
 }
 
 void sound_to_layer(Status* status, vec4 contrib) {
@@ -643,6 +644,14 @@ void audio_loop(ThreadArgs* args) {
         wav_to_sound("./res/sounds/impact_1.wav",   ptr + SOUND_IMPACT_1);
         wav_to_sound("./res/sounds/impact_2.wav",   ptr + SOUND_IMPACT_2);
         wav_to_sound("./res/sounds/impact_3.wav",   ptr + SOUND_IMPACT_3);
+
+        wav_to_sound("./res/sounds/clear_1.wav",    ptr + SOUND_CLEAR_1);
+        wav_to_sound("./res/sounds/clear_2.wav",    ptr + SOUND_CLEAR_2);
+        wav_to_sound("./res/sounds/clear_3.wav",    ptr + SOUND_CLEAR_3);
+        wav_to_sound("./res/sounds/clear_4.wav",    ptr + SOUND_CLEAR_4);
+
+        wav_to_sound("./res/sounds/player_win.wav", ptr + SOUND_PLAYER_WIN);
+        wav_to_sound("./res/sounds/ai_win.wav",     ptr + SOUND_AI_WIN);
     }
 
     // quick resample sounds to target sample_rate
@@ -683,7 +692,6 @@ void audio_loop(ThreadArgs* args) {
             #define iter    args->events.ring[i]
             u32 sig = WaitForSingleObject(args->mutex,0);
             if (sig == WAIT_OBJECT_0) {
-                printf("[Audio] Recv. New Events\n");
 
                 // iteration over ring buffer
                 u32 start_args[] = {args->events.ptr, 0};
@@ -735,6 +743,7 @@ void audio_loop(ThreadArgs* args) {
                 args->new_event = 0;
                 ReleaseMutex(args->mutex);
 
+#if 0
                 // DEBUG
                 #define X  active_sounds[i]
                 for (u32 i = 0; i < N_EVENTS; i++) {
@@ -743,6 +752,7 @@ void audio_loop(ThreadArgs* args) {
                 }
                 printf("\n");
                 #undef X
+#endif
 
             }
             #undef iter

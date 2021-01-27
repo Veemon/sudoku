@@ -32,7 +32,15 @@
 #define SOUND_IMPACT_2      9
 #define SOUND_IMPACT_3      10
 
-#define N_SOUNDS            11
+#define SOUND_CLEAR_1       11
+#define SOUND_CLEAR_2       12
+#define SOUND_CLEAR_3       13
+#define SOUND_CLEAR_4       14
+
+#define SOUND_PLAYER_WIN    15
+#define SOUND_AI_WIN        16
+
+#define N_SOUNDS            17
 
 struct Sound {
     u32   length;
