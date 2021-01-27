@@ -126,6 +126,12 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
                 data[0][i]  = f32(interp[i]) / (1<<15);
                 continue;
             }
+
+            if (sound->depth == 24) {
+                u8* bytes  = ((u8*) sound->data) + 3*i;
+                i32 interp = ( (bytes[2]<<24) | (bytes[1]<<16) | (bytes[0]<<8) );
+                data[0][i] = f32(interp) / (1<<31); // -- see sound_to_layer comment
+            }
         }
 
         if (sound->channels == 2) {
@@ -242,6 +248,14 @@ void resample_sound(Sound* sound, u32 rate, u8 quality) {
                 i16* interp = (i16*) sound->data;
                 interp[i]   = i16(out[0][i] * (1<<15));
                 continue;
+            }
+
+            if (sound->depth == 24) {
+                i32 val    = i32(out[0][i] * (1<<31));
+                u8* bytes  = ((u8*) sound->data) + 3*i;
+                bytes[0]   = (val>>8)  & 0xff;
+                bytes[1]   = (val>>16) & 0xff;
+                bytes[2]   = (val>>24) & 0xff;
             }
         }
 
@@ -384,12 +398,18 @@ void sound_to_layer(Status* status, vec4 contrib) {
         if (sound->channels == 1) {
             f32 val = 0.0;
             if (sound->depth == 8) {
+                // NOTE: apparently 8 bit files are in the [0,255] range?
                 i8* interp = (i8*) sound->data;
                 val = f32(interp[sample_idx]) / (1<<7);
             }
             if (sound->depth == 16) {
                 i16* interp = (i16*) sound->data;
                 val = f32(interp[sample_idx]) / (1<<15);
+            }
+            if (sound->depth == 24) {
+                u8* bytes  = ((u8*) sound->data) + 3*sample_idx;
+                i32 interp = ( (bytes[2]<<24) | (bytes[1]<<16) | (bytes[0]<<8) );
+                val = f32(interp) / (1<<31); // -- NOTE: this *seems* correct, but haven't read it anywhwere..
             }
             val *= loop_vol;
 
@@ -614,6 +634,7 @@ void audio_loop(ThreadArgs* args) {
         wav_to_sound("./res/740hz_-2db_3s_48khz.wav",       ptr + SOUND_SIN_HIGH);
         wav_to_sound("./res/10hz_10khz_-2db_3s_48khz.wav",  ptr + SOUND_SWEEP);
         wav_to_sound("./res/voice_stereo_48khz.wav",        ptr + SOUND_VOICE);
+        wav_to_sound("./res/sounds/pencil4.wav",            ptr + SOUND_PENCIL4);
     }
 
     // quick resample sounds to target sample_rate

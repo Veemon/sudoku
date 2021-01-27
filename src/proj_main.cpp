@@ -1,11 +1,12 @@
 /*
 TODO
 ------------------------------
-Add sound events
-
-Handle sound variations in proj_main
-    u8 variations[N_SOUNDS];
-    variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
+Audio
+ - Add sound events
+ - Fix the popping on init issue
+ - Handle sound variations in proj_main
+      u8 variations[N_SOUNDS];
+      variations[sound_id] = (variations[sound_id] + rand()) % N_SOUND_X_VARIATIONS
 
 Make the solver smarter
  - [Fast Solver] 
@@ -50,6 +51,19 @@ XXX
 #else
     #define DEBUG 0
 #endif
+
+
+#define DEBUG_BIN(x, n) {\
+    u8 string[n+1];\
+    string[n] = 0;\
+    for (u8 _it=0; _it<n; _it++) {\
+        string[n-1-_it] = ((long(x)>>_it)&0x0001);\
+        if (string[n-1-_it] > 0) string[n-1-_it] = 'X';\
+        else                     string[n-1-_it] = '-';\
+    }\
+    printf("%s", &string[0]);\
+}
+
 
 #define DEBUG_U16(x) {\
     u8 string[17];\
@@ -2024,6 +2038,18 @@ void main() {
 
 #define DEBUG_AUDIO_EVENTS      1
 #if DEBUG && DEBUG_AUDIO_EVENTS
+                if (!handled && KEY_UP(GLFW_KEY_Z)) {
+                    Event e;
+                    e.mode     = EventMode::start;
+                    e.sound_id = SOUND_PENCIL4;
+                    e.layer    = 0;
+                    e.volume   = 1.0f;
+                    e.angle    = 0.5f;
+
+                    ring_push(local_events, e);
+                    audio_updated = 1;
+                }                                                           
+
                 if (!handled && KEY_UP(GLFW_KEY_X)) {
                     // To test the sound angle of stereo data
                     Event e;
