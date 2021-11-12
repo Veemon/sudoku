@@ -2369,8 +2369,10 @@ void main() {
             glUniform2f(u_mouse_mouse, mouse_x, mouse_y);
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+            // end
+            glfwSwapBuffers(window);
         }
-        glfwSwapBuffers(window);
 
 
         // remove volatile cell states
