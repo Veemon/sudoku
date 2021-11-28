@@ -1879,7 +1879,15 @@ void main() {
                     handled = 1;
                 }
 #endif
-
+                
+                // board set statics
+                if (!handled && (event.mod & GLFW_MOD_CONTROL) && KEY_DOWN(GLFW_KEY_TAB)) {
+                    for (u32 i = 0; i < BOARD_SIZE; i++) {
+                        if (board_data[i] & BOARD_ALL) board_data[i] ^= BOARD_FLAG_STATIC;
+                    }
+                    board_input = 1;
+                    handled = 1;
+                }
 
                 // board clear
                 if (!handled && KEY_UP(GLFW_KEY_BACKSPACE)) {

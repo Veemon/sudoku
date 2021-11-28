@@ -10,6 +10,7 @@
 * `1-9`         to pen a digit
 * `Shift+n`     to pen a digit (`n`) out of pencil mode [_Try `Shift+1` for example, while in pencil mode_]
 * `Tab`         to toggle a cells permenancy
+* `Ctrl+Tab`    to toggle _all_ cells permenancy
 * `Escape`      to clear a cell
 * `Backspace`   to clear the board
 * `Ctrl+Z`      to undo
