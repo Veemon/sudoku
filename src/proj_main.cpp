@@ -2397,14 +2397,14 @@ void main() {
         // timing
         QueryPerformanceCounter(&end_time);
         delta_us.QuadPart = end_time.QuadPart - start_time.QuadPart;
-        delta_us.QuadPart *= pow_10[9];
+        delta_us.QuadPart *= pow_10[6];
         delta_us.QuadPart /= cpu_freq.QuadPart;
 
         total_time_us   += delta_us.QuadPart;
         render_timer_us += delta_us.QuadPart;
         solve_timer_us  += delta_us.QuadPart;
 
-        total_time = f64(total_time_us) / pow_10[9];
+        total_time = f64(total_time_us) / pow_10[6];
     }
 
     glfwDestroyWindow(window);
